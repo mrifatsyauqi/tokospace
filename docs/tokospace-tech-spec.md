@@ -4,17 +4,17 @@
 |---|---|
 | **Produk** | Tokospace — SaaS Multi-Tenant E-Commerce Builder |
 | **Domain** | tokospace.com |
-| **Versi** | 2.2 |
+| **Versi** | 2.3 |
 | **Tanggal** | 17 Agustus 2026 |
-| **Menggantikan** | `tokospace-tech-spec.md` v2.1 |
+| **Menggantikan** | `tokospace-tech-spec.md` v2.2 |
 | **Status** | **Approved — Development Baseline** |
-| **Selaras dengan** | `tokospace-PRD.md` v1.2, `tokospace-design-brief.md` v2.0, `tokospace-master-plan.md` v1.1 |
+| **Selaras dengan** | `tokospace-PRD.md` v1.2, `tokospace-design-brief.md` v2.0, `tokospace-master-plan.md` v1.2, `tokospace-prompt-development.md` v1.3 |
 
 ---
 
 ## 0. Keputusan Final
 
-**Stack:** Laravel 11 API di Oracle Cloud target environment + Next.js 15 frontend di Vercel + PostgreSQL + Redis/Horizon + Cloudflare R2. GitHub menjadi source of truth; GitHub Actions menangani CI/CD backend dan Vercel menangani deployment frontend.
+**Stack:** Laravel 11 API di Oracle Cloud target environment + Next.js 15 frontend di Vercel + PostgreSQL + Redis/Horizon + Cloudflare R2. GitHub menjadi source of truth dan menggunakan **satu monorepo Tokospace**. CI/CD backend dan frontend tetap independen berdasarkan path/perubahan aplikasi.
 
 ### 0.1 Architecture Boundaries
 
@@ -35,7 +35,8 @@
 7. Webhook wajib signature-verified dan idempotent.
 8. Custom-domain UI adalah P1, tetapi tenant/domain model sudah menjadi P0 foundation.
 9. Tidak ada seller wallet/payout/transaction-fee ledger pada baseline.
-10. Perubahan arsitektur yang melanggar aturan di atas memerlukan ADR + perubahan PRD/Tech Spec sebelum coding.
+10. Backend dan frontend berada dalam satu monorepo tetapi tetap merupakan dua application boundaries dan dua deployment pipelines.
+11. Perubahan arsitektur yang melanggar aturan di atas memerlukan ADR + perubahan PRD/Tech Spec sebelum coding.
 
 ---
 
@@ -52,7 +53,7 @@
 | Storage | Cloudflare R2 | S3-compatible permanent media |
 | Email | Resend | MVP provider |
 | Error tracking | Sentry | Backend + frontend |
-| Frontend hosting | Vercel | Auto-deploy dari GitHub |
+| Frontend hosting | Vercel | Auto-deploy dari GitHub monorepo |
 | Backend hosting | Oracle Cloud Always Free target | Docker Compose; tidak hard-dependent |
 
 ---
@@ -79,7 +80,82 @@ Oracle local disk hanya:
 
 ---
 
-## 2. Arsitektur
+## 2. Repository & Application Architecture
+
+Tokospace menggunakan **monorepo** sebagai source of truth untuk dokumentasi, backend, frontend, dan infrastructure configuration.
+
+```text
+tokospace/
+├── apps/
+│   ├── api/                 # Laravel 11 backend
+│   └── web/                 # Next.js 15 frontend
+├── docs/                    # PRD, Tech Spec, Design Brief, Master Plan, AI prompts
+├── infra/                   # Docker, Nginx, deployment/ops scripts
+├── packages/                # Shared generated contracts/types only when needed
+├── .github/
+│   └── workflows/           # Independent API/Web CI/CD workflows
+├── AGENTS.md                # Global AI/repository rules
+└── README.md
+```
+
+### 2.1 Application Boundaries
+
+Monorepo **tidak berarti satu application**.
+
+```text
+apps/api → Laravel → PostgreSQL/Redis/R2 → Oracle
+apps/web → Next.js → Laravel API → Vercel
+```
+
+Rules:
+
+- `apps/web` tidak boleh mengakses database, Redis, atau internal Laravel classes.
+- `apps/api` menjadi authority untuk business logic, authorization, tenant isolation, orders, payments, and persistence.
+- `apps/web` menjadi authority untuk presentation, SSR/ISR, storefront, dashboard, and admin frontend.
+- Shared code hanya boleh ditempatkan di `packages/` jika memang reusable dan tidak membocorkan backend internals.
+- Generated API types/contracts boleh dibagikan; model Eloquent, service Laravel, secret, atau database code tidak boleh di-import frontend.
+
+### 2.2 Local Development
+
+Root repository menyediakan satu developer entry point untuk menjalankan service yang diperlukan.
+
+Target development flow:
+
+```text
+clone tokospace
+   ↓
+docker compose / documented dev command
+   ├── Laravel API
+   ├── PostgreSQL
+   ├── Redis/Horizon
+   └── Next.js web
+```
+
+Frontend dan backend boleh dijalankan pada port berbeda, tetapi boundary komunikasi tetap HTTP API.
+
+### 2.3 CI/CD Boundary
+
+Satu monorepo menggunakan pipeline terpisah:
+
+```text
+apps/api/**
+  ↓
+API CI
+  ↓
+API deployment → Oracle
+
+apps/web/**
+  ↓
+Web CI
+  ↓
+Vercel deployment
+```
+
+Perubahan `docs/**` saja tidak boleh memicu deployment aplikasi. Perubahan `infra/**` atau root configuration dapat memicu pipeline yang relevan berdasarkan aturan workflow.
+
+---
+
+## 3. Arsitektur Runtime
 
 ```text
                          VERCEL
@@ -108,18 +184,11 @@ Oracle local disk hanya:
                     permanent media
 ```
 
-Repositories:
-
-```text
-tokospace-api → Laravel → GitHub Actions → Oracle
-tokospace-web → Next.js → Vercel
-```
-
 ---
 
-## 3. Tenant Resolution & Isolation
+## 4. Tenant Resolution & Isolation
 
-### 3.1 Public Storefront
+### 4.1 Public Storefront
 
 ```text
 Customer request
@@ -139,7 +208,7 @@ Next.js boleh membantu routing, tetapi **Laravel adalah source of truth untuk te
 
 Public endpoint tidak menerima `tenant_id` mentah sebagai sumber otoritas.
 
-### 3.2 Seller Dashboard
+### 4.2 Seller Dashboard
 
 ```text
 Seller login
@@ -153,7 +222,7 @@ Policy + Global Scope
 PostgreSQL RLS
 ```
 
-### 3.3 Domain Model
+### 4.3 Domain Model
 
 Minimum:
 
@@ -164,7 +233,7 @@ tenants
 - name
 - status
 
- domains
+domains
 - id
 - tenant_id
 - domain
@@ -178,7 +247,7 @@ Canonical subdomain dibuat sejak Tahap 1. Custom domain hanya menambah record da
 
 ---
 
-## 3.4 PostgreSQL RLS Tenant Context
+## 4.4 PostgreSQL RLS Tenant Context
 
 RLS wajib mempunyai tenant context yang konsisten dengan Laravel request context.
 
@@ -215,7 +284,7 @@ Detail mekanisme PostgreSQL session context yang dipilih saat implementasi harus
 
 ---
 
-## 4. Infrastructure Portability
+## 5. Infrastructure Portability
 
 Oracle adalah **target environment**, bukan hard dependency.
 
@@ -237,9 +306,9 @@ Tidak boleh ada kode aplikasi yang mengasumsikan CPU/RAM Oracle tertentu.
 
 ---
 
-## 5. Domain & Vercel
+## 6. Domain & Vercel
 
-### 5.1 Canonical Subdomain
+### 6.1 Canonical Subdomain
 
 Tahap 1 harus menghasilkan:
 
@@ -255,7 +324,7 @@ Laravel TenantResolver
 Tenant
 ```
 
-### 5.2 Custom Domain
+### 6.2 Custom Domain
 
 Fitur seller custom domain dilakukan pada Tahap 7.
 
@@ -268,13 +337,13 @@ VercelDomainService
 └── remove()
 ```
 
-**Implementation rule:** gunakan **latest supported Vercel Domains API** pada saat coding. Versi endpoint/API path yang tertulis di dokumen sebelumnya adalah implementation detail, bukan contract bisnis. Jangan meng-hardcode versi lama hanya karena contoh dokumentasi lama.
+**Implementation rule:** gunakan **latest supported Vercel Domains API** pada saat coding. Versi endpoint/API path yang tertulis di dokumen sebelumnya adalah implementation detail, bukan contract bisnis.
 
 Vercel menjadi source of truth untuk domain verification/SSL status jika API menyediakan status tersebut.
 
 ---
 
-## 6. Deployment
+## 7. Deployment
 
 ### Backend
 
@@ -283,7 +352,7 @@ feature branch
    ↓
 Pull Request
    ↓
-GitHub Actions
+API CI
    ├── tests
    ├── static/architecture checks
    └── build/deploy validation
@@ -299,25 +368,29 @@ Laravel migrate/optimize
 queue restart
 ```
 
+Deployment workflow berada di `.github/workflows/` dan hanya menjalankan backend deployment ketika perubahan backend/infrastructure yang relevan terjadi.
+
 Rollback harus dapat mengubah symlink ke release sebelumnya tanpa rebuild source.
 
 ### Frontend
 
 ```text
-GitHub
+GitHub monorepo
   ↓
-Vercel
+Vercel project (root directory: apps/web)
   ↓
 Preview
   ↓
 Production after merge
 ```
 
+Vercel harus dikonfigurasi dengan root directory `apps/web` sehingga frontend deployment tidak memperlakukan seluruh monorepo sebagai Next.js project.
+
 ---
 
-## 7. Payment Architecture
+## 8. Payment Architecture
 
-### 7.1 Platform Subscription
+### 8.1 Platform Subscription
 
 ```text
 Seller
@@ -327,7 +400,7 @@ Tokospace billing
 Tokospace-owned gateway account
 ```
 
-### 7.2 Tenant Customer Payment
+### 8.2 Tenant Customer Payment
 
 ```text
 Customer
@@ -373,7 +446,7 @@ optional queued notification
 
 ---
 
-## 8. Queue, Scheduler & Horizon
+## 9. Queue, Scheduler & Horizon
 
 Laravel Scheduler menjadi scheduler utama backend.
 
@@ -400,12 +473,12 @@ Contoh:
 
 ---
 
-## 9. Modular Architecture
+## 10. Modular Architecture
 
 Backend:
 
 ```text
-app/Modules/
+apps/api/app/Modules/
 ├── Tenant
 ├── Auth
 ├── Catalog
@@ -436,31 +509,35 @@ Model / Database
 
 Provider-dependent integrations hanya melalui interface/contract.
 
-`docs/CODEMAP.md` dan `CLAUDE.md` di setiap repo wajib menjaga boundary ini.
+Repository guidance berada di root `AGENTS.md`; backend-specific guidance dapat berada di `apps/api/CLAUDE.md` bila diperlukan. Jangan membuat duplikasi aturan yang saling bertentangan.
 
 ---
 
-## 10. API Contract
+## 11. API Contract
 
 Laravel menghasilkan OpenAPI.
 
 Next.js generate TypeScript types dari OpenAPI pada CI.
 
 ```text
-Laravel
+apps/api
  ↓
 OpenAPI
  ↓
 openapi-typescript
  ↓
-Next.js shared types
+packages/api-types atau apps/web/generated
+ ↓
+apps/web
 ```
+
+Generated contract harus berasal dari backend; frontend tidak boleh mendefinisikan ulang response shape secara manual jika type sudah tersedia.
 
 Breaking API change harus terdeteksi di CI sebelum merge.
 
 ---
 
-## 11. Performance & Caching
+## 12. Performance & Caching
 
 Prinsip: traffic customer tidak boleh 1:1 terhadap Postgres queries.
 
@@ -507,7 +584,7 @@ Jangan menyebarkan raw HTTP revalidation calls ke banyak model event/controller.
 
 ---
 
-## 12. Storage & Upload Flow
+## 13. Storage & Upload Flow
 
 ```text
 Browser
@@ -525,7 +602,7 @@ File permanent tidak pernah menjadi dependency filesystem Oracle.
 
 ---
 
-## 13. Backup & Recovery
+## 14. Backup & Recovery
 
 Database backup terjadwal + restore test.
 
@@ -539,7 +616,7 @@ R2 data retention/backup mengikuti object-storage policy provider; application m
 
 ---
 
-## 14. Security Checklist
+## 15. Security Checklist
 
 - HTTPS.
 - Encrypted third-party credentials.
@@ -557,7 +634,7 @@ R2 data retention/backup mengikuti object-storage policy provider; application m
 
 ---
 
-## 15. Environment Separation
+## 16. Environment Separation
 
 Minimum:
 
@@ -571,15 +648,16 @@ Environment secrets disimpan pada secret manager/platform masing-masing, bukan r
 
 ---
 
-## 16. Readiness Gate
+## 17. Readiness Gate
 
 Tahap 0 boleh dimulai setelah:
 
 - PRD v1.2 berstatus Approved.
-- Master Plan v1.1 berstatus Approved.
+- Master Plan v1.2 berstatus Approved.
 - Design Brief v2.0 menjadi visual authority.
-- Prompt Development memiliki NON-NEGOTIABLE rules.
+- Prompt Development v1.3 memiliki NON-NEGOTIABLE rules.
 - D1/D2/D3 final.
+- Monorepo strategy final: `apps/api` + `apps/web` dalam satu repository.
 - Domain foundation dipastikan Tahap 1.
 - RLS tenant context implementation strategy dicatat sebagai ADR sebelum modul tenant selesai.
 
