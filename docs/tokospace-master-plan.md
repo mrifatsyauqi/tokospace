@@ -3,10 +3,10 @@
 | | |
 |---|---|
 | **Produk** | Tokospace — SaaS Multi-Tenant E-Commerce Builder |
-| **Versi** | 1.1 |
+| **Versi** | 1.2 |
 | **Tanggal** | 17 Agustus 2026 |
-| **Mengikat** | `tokospace-PRD.md` v1.2 · `tokospace-design-brief.md` v2.0 · `tokospace-tech-spec.md` v2.1 |
-| **Pasangan dokumen** | `tokospace-prompt-development.md` — prompt siap pakai per tahap |
+| **Mengikat** | `tokospace-PRD.md` v1.2 · `tokospace-design-brief.md` v2.0 · `tokospace-tech-spec.md` v2.3 |
+| **Pasangan dokumen** | `tokospace-prompt-development.md` v1.3 — prompt siap pakai per tahap |
 | **Status** | **Approved — Development Baseline** |
 
 > PRD menjawab **apa**, Design Brief menjawab **visual/interaksi**, Tech Spec menjawab **bagaimana secara teknis**, Master Plan menjawab **urutan/dependency**, dan Prompt Development menjawab **instruksi eksekusi AI**.
@@ -16,15 +16,63 @@
 ## 1. Prinsip Eksekusi
 
 1. Urutan mengikuti dependency data.
-2. Backend Laravel dan frontend Next.js dibangun berpasangan per tahap.
+2. Backend Laravel dan frontend Next.js dibangun berpasangan per tahap dalam **satu monorepo**.
 3. Setiap tahap memiliki Definition of Done yang dapat diverifikasi.
 4. Desain yang belum tersedia harus dibuat dan di-handoff sebelum halaman dikodekan.
 5. P0 diselesaikan sebelum P1, tetapi fondasi domain/tenant yang diperlukan fitur P1 tetap dibuat di P0.
 6. Semua perubahan lintas dokumen harus mengikuti authority masing-masing dan dicatat sebagai ADR bila mengubah keputusan arsitektur.
+7. Monorepo tidak berarti satu deployment: `apps/api` dan `apps/web` tetap memiliki boundary, CI, dan deployment pipeline masing-masing.
 
 ---
 
-## 2. Peta Ketergantungan Modul
+## 2. Repository & Development Topology
+
+Tokospace menggunakan satu repository sebagai source of truth:
+
+```text
+tokospace/
+├── apps/
+│   ├── api/                 # Laravel 11
+│   └── web/                 # Next.js 15
+├── docs/                    # product + technical source of truth
+├── infra/                   # Docker/Nginx/ops configuration
+├── packages/                # shared generated contracts/types bila diperlukan
+├── .github/workflows/       # independent API/Web CI/CD
+├── AGENTS.md
+└── README.md
+```
+
+### Deployment boundary
+
+```text
+apps/api/**
+   ↓
+API CI
+   ↓
+Oracle deployment
+
+apps/web/**
+   ↓
+Web CI
+   ↓
+Vercel deployment
+```
+
+### Development boundary
+
+```text
+apps/web
+   ↓ HTTPS
+apps/api
+   ↓
+PostgreSQL / Redis / R2
+```
+
+`apps/web` tidak boleh mengakses database atau internal Laravel classes secara langsung.
+
+---
+
+## 3. Peta Ketergantungan Modul
 
 ```text
                          ┌──────────┐
@@ -77,12 +125,12 @@
 
 ---
 
-## 3. Tahapan Development
+## 4. Tahapan Development
 
 | Tahap | Fokus | Backend | Frontend | Prioritas |
 |---|---|---|---|---|
 | **0** | Fondasi infrastruktur | setup/deploy/CI | placeholder | Prasyarat |
-| **1** | Tenant, Auth, Onboarding | `tenant`, `auth` | auth + onboarding | P0 |
+| **1** | Tenant, Auth, Onboarding | `tenant`, `auth`, `domain` | auth + onboarding | P0 |
 | **2** | Katalog | `catalog` | product dashboard + storefront | P0 |
 | **3** | Order & transaksi manual | `order`, `payment`, `shipping` | cart, checkout, order | P0 |
 | **4** | Billing & Theme | `billing`, `theme` | billing, theme editor | P0 |
@@ -94,15 +142,19 @@
 
 ---
 
-## 4. Detail per Tahap
+## 5. Detail per Tahap
 
 ### Tahap 0 — Fondasi Infrastruktur
 
 Menghasilkan tempat fitur dibangun.
 
-**Backend:** dua repo (`tokospace-api`, `tokospace-web`), Docker Compose di Oracle target environment, API health endpoint, PostgreSQL, Redis, Horizon, scheduler, CI/CD dasar, backup job.
+**Repository:** satu monorepo `tokospace`.
 
-**Frontend:** placeholder production route di Vercel.
+**Backend:** `apps/api` — Laravel 11, Docker Compose, API health endpoint, PostgreSQL, Redis, Horizon, scheduler, CI/CD dasar, backup job.
+
+**Frontend:** `apps/web` — Next.js 15 placeholder production route di Vercel.
+
+**Infrastructure:** `infra/` untuk konfigurasi Docker/Nginx/operasional yang memang perlu dibagikan repository.
 
 **DoD:**
 - `api.tokospace.com/health` → 200
@@ -110,6 +162,7 @@ Menghasilkan tempat fitur dibangun.
 - push `main` memicu deployment target tanpa error
 - database backup terjadwal
 - restore backup diuji sebelum MVP Release
+- API/Web CI berjalan independen sesuai perubahan path
 
 ### Tahap 1 — Tenant, Auth, Onboarding
 
@@ -204,7 +257,7 @@ Ini adalah **gerbang resmi MVP Release**.
 
 ### Tahap 8 — Fitur Penunjang Seller
 
-Discount/promo, analytics, return/refund dengan provider-agnostic service boundary.
+Discount/promo, analytics aggregation, return/refund dengan provider-agnostic service boundary.
 
 ### Tahap 9 — Super Admin Lengkap
 
@@ -212,7 +265,7 @@ Monitoring integrasi, package management, theme management, billing reporting, s
 
 ---
 
-## 5. Dependency & Design Gate
+## 6. Dependency & Design Gate
 
 Sebelum coding sebuah halaman:
 
@@ -232,7 +285,7 @@ Jangan mengubah UI/business behavior langsung di prompt coding jika perubahan te
 
 ---
 
-## 6. Global MVP Release Gate
+## 7. Global MVP Release Gate
 
 Sebelum Fase 1:
 
@@ -252,13 +305,25 @@ Sebelum Fase 1:
 
 ---
 
-## 7. Strategy Model AI
+## 8. Strategy Model AI
 
 Model AI yang ditetapkan di Prompt Development adalah rekomendasi efisiensi, bukan bagian dari application architecture. Prompt harus selalu membawa aturan non-negotiable yang relevan dengan tahap yang sedang dikerjakan.
 
+AI agent bekerja terhadap monorepo dan wajib memahami:
+
+```text
+root docs
+  ↓
+apps/api + apps/web
+  ↓
+shared contracts only when needed
+```
+
+AI tidak boleh membuat repository kedua untuk API atau Web tanpa ADR dan perubahan Tech Spec.
+
 ---
 
-## 8. Authority antar Dokumen
+## 9. Authority antar Dokumen
 
 - **PRD** = business requirements dan acceptance criteria.
 - **Tech Spec** = technical architecture/infrastructure.
