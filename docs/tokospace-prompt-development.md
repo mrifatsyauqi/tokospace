@@ -11,10 +11,23 @@ Sebelum menjalankan prompt tahap mana pun, Claude Code wajib membaca dan mengiku
 - `docs/tokospace-design-brief.md` — **visual/interaction authority**.
 - `docs/tokospace-master-plan.md` — **sequence/dependency authority**.
 
+### MONOREPO RULES
+
+1. Tokospace menggunakan **satu monorepo**.
+2. Backend berada di `apps/api` dan frontend di `apps/web`.
+3. Dokumentasi berada di `docs`; infrastructure/shared operational configuration berada di `infra` bila memang diperlukan.
+4. Jangan membuat `tokospace-api` atau `tokospace-web` sebagai repository baru.
+5. Jangan menjalankan `git init` ulang pada repository yang sudah ada.
+6. `apps/api` dan `apps/web` tetap merupakan application boundaries terpisah walaupun berada dalam satu Git repository.
+7. Frontend tidak boleh mengakses PostgreSQL, Redis, atau internal Laravel classes secara langsung.
+8. Deployment API → Oracle dan Web → Vercel tetap independen.
+9. Shared code hanya boleh dibuat di `packages/` bila benar-benar reusable dan tidak membocorkan backend internals.
+10. API contract berasal dari Laravel/OpenAPI; frontend tidak boleh mendefinisikan ulang response contract secara manual jika generated types tersedia.
+
 ### NON-NEGOTIABLE RULES
 
 1. **Tenant isolation adalah aturan keamanan inti.** Semua data tenant-aware harus punya `tenant_id`, Global Scope aktif, Policy, PostgreSQL RLS, dan test cross-tenant.
-2. **Tenant context tidak boleh berasal langsung dari input client.** Public request direresolve melalui `TenantResolver`; dashboard menggunakan tenant dari identity/session authenticated.
+2. **Tenant context tidak boleh berasal langsung dari input client.** Public request di-resolve melalui `TenantResolver`; dashboard menggunakan tenant dari identity/session authenticated.
 3. **Media production selalu R2.** Jangan menyimpan foto produk, logo, banner, bukti transfer, invoice, import/export, atau media bisnis permanen di disk lokal Oracle.
 4. **Payment context tidak boleh dicampur.** Gateway platform Tokospace hanya untuk subscription Tokospace; gateway tenant (Midtrans/Tripay) untuk customer membayar seller.
 5. **Order module tidak boleh bergantung langsung pada provider.** Gunakan `PaymentProviderInterface` / `ShippingProviderInterface` dan provider implementation.
@@ -24,14 +37,14 @@ Sebelum menjalankan prompt tahap mana pun, Claude Code wajib membaca dan mengiku
 9. **Cart, checkout, account, dan order tidak boleh memakai stale cache.** Catalog/storefront boleh di-cache sesuai Tech Spec.
 10. **Jangan mengubah architecture/scope secara diam-diam.** Jika implementasi menemukan konflik antar dokumen atau membutuhkan keputusan baru, berhenti, jelaskan konflik, dan buat ADR/perubahan dokumen sebelum coding lanjut.
 11. **Test harus berjalan sebelum mengklaim selesai.** Jangan menganggap compile/build saja sebagai DoD.
-12. **Jangan membuat branch atau repository baru yang tidak diminta.** Kerjakan pada branch fitur yang sudah ada dan buat Pull Request ke `main`.
+12. **Jangan membuat branch atau repository baru yang tidak diminta.** Kerjakan pada branch fitur di monorepo dan buat Pull Request ke `main`.
 
 ### Workflow setiap tahap
 
 ```text
 Read authority docs
       ↓
-Inspect current repository state
+Inspect current monorepo state
       ↓
 Plan
       ↓
@@ -43,6 +56,8 @@ Verify tenant/security constraints
       ↓
 Check DoD tahap
       ↓
+Inspect diff
+      ↓
 Commit
       ↓
 Pull Request → main
@@ -52,57 +67,66 @@ Pull Request → main
 
 ## Tahap -1 — Hubungkan Claude Code ke Repo
 
-Repo sudah ada. Jangan `git init` ulang.
+Repository utama sudah ada: `mrifatsyauqi/tokospace`.
 
-### Mode A — Claude Code langsung di repo
-
-1. Clone repo yang relevan.
-2. Buka Claude Code dari folder repo.
+1. Clone/open repository `tokospace`.
+2. Buka Claude Code dari **root monorepo**.
 3. Pastikan Git authentication aktif.
-4. Baca `docs/` dan `CLAUDE.md` sebelum mengubah code.
+4. Baca `docs/`, root `AGENTS.md` bila tersedia, dan repository instructions sebelum mengubah code.
 5. Buat branch fitur dari `main`.
 6. Commit perubahan dan buka PR; jangan push langsung ke `main`.
 
-### Mode B — GitHub-triggered Claude
-
-Gunakan hanya untuk perubahan kecil jika workflow GitHub App Claude sudah dikonfigurasi. Tetap mengikuti NON-NEGOTIABLE RULES dan wajib membuka PR.
+Jika root repository belum memiliki application scaffold, Claude boleh membuat struktur `apps/api`, `apps/web`, dan `infra` sesuai Tahap 0. Jangan membuat repository terpisah.
 
 ---
 
 ## Tahap 0 — Fondasi Infrastruktur
 
 **Model:** Sonnet
-**Repo:** `tokospace-api` + `tokospace-web`
+**Repo:** monorepo `tokospace`
 
 ```text
 Tujuan: membangun fondasi deployable, bukan fitur bisnis.
 
-BACKEND — tokospace-api
-1. Setup Laravel 11 + PHP 8.3 di repo yang sudah ada; JANGAN git init ulang.
-2. Docker Compose: Nginx, PHP-FPM, PostgreSQL 16, Redis, Supervisor/Horizon.
-3. Semua resource-dependent settings lewat environment; siapkan scripts/tune.sh.
-4. Filesystems: local untuk temp/cache/log saja; r2 sebagai disk media production.
+REPOSITORY FOUNDATION
+1. Inspect root repository sebelum membuat file.
+2. Pertahankan docs/ sebagai source of truth.
+3. Buat/validasi apps/api, apps/web, infra, .github/workflows sesuai kebutuhan.
+4. Buat root AGENTS.md untuk aturan monorepo dan backend/frontend guidance hanya bila diperlukan.
+5. Jangan membuat repository kedua.
+
+BACKEND — apps/api
+1. Setup Laravel 11 + PHP 8.3.
+2. Docker Compose: Nginx, PHP-FPM/Laravel, PostgreSQL 16, Redis, Horizon/worker.
+3. Semua resource-dependent settings lewat environment.
+4. Filesystems: local untuk temp/cache/log saja; R2 sebagai disk media production.
 5. GET /health → HTTP 200 dan memeriksa koneksi DB + Redis.
 6. Pest + architecture test group.
-7. GitHub Actions: CI test/lint/arch-test; deployment ke Oracle memakai release-folder + symlink + rollback-ready flow sesuai Tech Spec.
+7. GitHub Actions API CI; deployment ke Oracle memakai release-folder + symlink + rollback-ready flow sesuai Tech Spec.
 8. Backup PostgreSQL terjadwal; backup media/database mengikuti kebijakan Tech Spec.
-9. Buat CLAUDE.md, CODEMAP.md, dan ADR-0001 stack.
 
-FRONTEND — tokospace-web
+FRONTEND — apps/web
 1. Setup Next.js 15 App Router + TypeScript.
 2. Route groups: (marketing), (dashboard), (storefront), (admin).
 3. Design tokens dari Design Brief.
 4. Placeholder pada route utama.
-5. Deploy via Vercel.
-6. Buat shared API/types foundation untuk OpenAPI-generated types.
+5. Deploy via Vercel dengan root directory apps/web.
+6. Siapkan generated API/types foundation tanpa mengakses database langsung.
+
+MONOREPO CI/CD
+1. API workflow untuk apps/api/** dan dependency/configuration yang relevan.
+2. Web workflow untuk apps/web/** dan dependency/configuration yang relevan.
+3. Docs-only changes tidak memicu application deployment.
+4. Root/infra changes dievaluasi dan memicu pipeline relevan bila diperlukan.
 
 DoD:
 - health endpoint 200;
 - Vercel placeholder aktif;
-- CI lulus;
+- API/Web CI lulus;
 - deployment path tervalidasi;
 - backup job ada;
-- tidak ada secret di repo.
+- tidak ada secret di repo;
+- tidak ada repository kedua dibuat.
 ```
 
 ---
@@ -110,12 +134,12 @@ DoD:
 ## Tahap 1 — Tenant, Auth, Onboarding
 
 **Model:** Opus → Sonnet
-**Repo:** keduanya
+**Repo:** monorepo `tokospace`
 
 ```text
 Ini tahap keamanan paling kritis. Rencanakan tenant isolation terlebih dahulu.
 
-BACKEND
+BACKEND — apps/api
 1. Migrasi: tenants, domains, users, otp_codes, password_resets.
 2. users memakai UNIQUE(tenant_id, email) sesuai D3.
 3. TenantResolver adalah satu abstraction untuk domain → tenant.
@@ -128,7 +152,7 @@ BACKEND
 10. Sanctum auth, email verification, password reset, rate limit.
 11. Test wajib: Tenant A tidak dapat membaca/mengubah data Tenant B.
 
-FRONTEND
+FRONTEND — apps/web
 1. Login, register, forgot-password, verify-email.
 2. Onboarding 4 step: nama toko/subdomain → kategori → theme → logo.
 3. Live availability check subdomain.
@@ -152,12 +176,12 @@ seller daftar → verifikasi → pilih subdomain → storefront tenant benar →
 ## Tahap 2 — Katalog Produk
 
 **Model:** Sonnet
-**Repo:** keduanya
+**Repo:** monorepo `tokospace`
 
 ```text
 Bangun Catalog hanya setelah Tenant/Auth DoD lulus.
 
-BACKEND
+BACKEND — apps/api
 1. categories, products, product_variants, weight_gram.
 2. Semua tabel tenant-aware dan scoped.
 3. Catalog Service + Repository.
@@ -167,7 +191,7 @@ BACKEND
 7. Public storefront endpoints resolve tenant melalui TenantResolver.
 8. Tidak ada query lintas tenant.
 
-FRONTEND
+FRONTEND — apps/web
 1. Product dashboard.
 2. Storefront catalog + product detail.
 3. Gunakan caching sesuai Tech Spec dan tag tenant/product.
@@ -181,12 +205,12 @@ produk + media R2 berhasil dibuat, tampil di tenant storefront yang benar, dan i
 ## Tahap 3 — Pesanan & Transaksi Manual
 
 **Model:** Opus → Sonnet
-**Repo:** keduanya
+**Repo:** monorepo `tokospace`
 
 ```text
 Ini tahap paling kritis secara bisnis.
 
-BACKEND
+BACKEND — apps/api
 1. carts, orders, order_items, payments, shipments.
 2. Order snapshot: product, variant, price, shipping address, customer contact.
 3. Reserve stock ketika order dibuat memakai DB transaction + SELECT ... FOR UPDATE.
@@ -197,7 +221,7 @@ BACKEND
 8. Semua upload bukti transfer → R2.
 9. Order state transition harus tervalidasi dan audit/history dicatat.
 
-FRONTEND
+FRONTEND — apps/web
 1. Cart.
 2. Checkout.
 3. Manual transfer proof upload.
@@ -217,13 +241,13 @@ customer → checkout → manual payment → seller verification → shipment �
 ## Tahap 4 — Billing Platform & Theme
 
 **Model:** Sonnet
-**Repo:** keduanya
+**Repo:** monorepo `tokospace`
 
 ```text
 Billing di sini adalah SUBSCRIPTION SELLER KE TOKOSPACE.
 Jangan mencampurnya dengan payment customer→seller.
 
-BACKEND
+BACKEND — apps/api
 1. plans, subscriptions, invoices/records sesuai PRD schema.
 2. Satu platform payment account Tokospace; credential server-side.
 3. Starter gratis permanen; Pro/Business berbayar.
@@ -231,7 +255,7 @@ BACKEND
 5. Grace period/read-only/suspend sesuai Master Plan.
 6. Theme config per tenant; media → R2.
 
-FRONTEND
+FRONTEND — apps/web
 1. Billing dashboard.
 2. Upgrade/plan selection.
 3. Invoice/history.
@@ -247,7 +271,7 @@ subscription lifecycle bekerja; quota enforcement benar; theme tersimpan per ten
 ## Tahap 5 — SEO & MVP Hardening
 
 **Model:** Sonnet
-**Repo:** keduanya
+**Repo:** monorepo `tokospace`
 
 ```text
 Ini GERBANG MVP RELEASE.
@@ -273,11 +297,12 @@ Hanya setelah DoD ini Fase 1 boleh dimulai.
 ## Tahap 6 — Payment & Shipping Otomatis
 
 **Model:** Opus → Sonnet
+**Repo:** monorepo `tokospace`
 
 ```text
 Fokus payment customer→seller dan shipping provider.
 
-PAYMENT
+PAYMENT — apps/api
 1. Implement PaymentProviderInterface → MidtransProvider + TripayProvider.
 2. Seller memasukkan credential milik seller sendiri.
 3. Credential encrypted di backend.
@@ -288,13 +313,13 @@ PAYMENT
 8. Persist transaction record untuk order reconciliation.
 9. Jangan membuat seller wallet/payout/transaction-fee ledger Tokospace.
 
-SHIPPING
+SHIPPING — apps/api
 1. ShippingProviderInterface → JntProvider + KiriminAjaProvider.
 2. Credential seller encrypted.
 3. Timeout/retry/fallback sesuai provider contract.
 4. Gunakan queue untuk pekerjaan yang cocok asynchronous.
 
-FRONTEND
+FRONTEND — apps/web
 Payment/shipping settings + checkout automation.
 
 DoD:
@@ -306,6 +331,7 @@ provider connection berhasil, payment callback aman/idempotent, seller menerima 
 ## Tahap 7 — Custom Domain & WhatsApp
 
 **Model:** Sonnet
+**Repo:** monorepo `tokospace`
 
 ```text
 CUSTOM DOMAIN
