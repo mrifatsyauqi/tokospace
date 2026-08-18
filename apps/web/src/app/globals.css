@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens sourced from docs/tokospace-design-brief.md §2.
+ * Do not add colors/radii outside this token set without updating the Design Brief first —
+ * it is the visual/interaction authority (Tech Spec §0.1).
+ */
+:root {
+  --color-bg-base: #ffffff;
+  --color-bg-subtle: #f7f7f5;
+  --color-ink-900: #0a0a0a;
+  --color-ink-600: #525252;
+  --color-ink-400: #6e6e6e;
+  --color-ink-300: #9a9a9a;
+  --color-line-200: #e5e5e2;
+  --color-line-100: #efefed;
+  --color-success: #1a7f37;
+  --color-danger: #c22e2e;
+  --color-warning: #8a6410;
+}
+
+@theme inline {
+  --color-bg-base: var(--color-bg-base);
+  --color-bg-subtle: var(--color-bg-subtle);
+  --color-ink-900: var(--color-ink-900);
+  --color-ink-600: var(--color-ink-600);
+  --color-ink-400: var(--color-ink-400);
+  --color-ink-300: var(--color-ink-300);
+  --color-line-200: var(--color-line-200);
+  --color-line-100: var(--color-line-100);
+  --color-success: var(--color-success);
+  --color-danger: var(--color-danger);
+  --color-warning: var(--color-warning);
+
+  /* Design Brief §2.2: Display = General Sans (not yet self-hosted, using its documented
+     fallback chain until the Fontshare asset is added), Body/UI = Inter, Data = IBM Plex Mono. */
+  --font-display: var(--font-inter), system-ui, sans-serif;
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-ibm-plex-mono), ui-monospace, monospace;
+
+  /* Design Brief §2.3 */
+  --radius-input: 4px;
+  --radius-card: 8px;
+  --radius-modal: 12px;
+}
+
+/* Design Brief §2.4: no dark mode in V1/Fase 1 — intentionally no prefers-color-scheme override. */
+body {
+  background: var(--color-bg-base);
+  color: var(--color-ink-900);
+  font-family: var(--font-sans);
+}

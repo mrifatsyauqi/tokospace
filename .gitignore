@@ -1,0 +1,7 @@
+# Root-level only — apps/api and apps/web have their own .gitignore for
+# framework-specific artifacts (vendor/, node_modules/, .next/, etc).
+
+.env
+!.env.example
+
+.DS_Store

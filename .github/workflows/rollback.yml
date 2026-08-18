@@ -1,0 +1,43 @@
+name: API Rollback
+
+# Tech Spec §7 — manually triggered from the GitHub mobile app, no SSH
+# terminal needed. Flips the "current" symlink back; never rebuilds source.
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Release timestamp to roll back to (leave blank for the previous release)"
+        required: false
+        default: ""
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Roll back current release on Oracle
+        uses: appleboy/ssh-action@v1
+        env:
+          DEPLOY_ROOT: ${{ secrets.ORACLE_DEPLOY_ROOT }}
+          RELEASE_TARGET: ${{ inputs.release }}
+        with:
+          host: ${{ secrets.ORACLE_SSH_HOST }}
+          username: ${{ secrets.ORACLE_SSH_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          envs: DEPLOY_ROOT,RELEASE_TARGET
+          script: |
+            set -euo pipefail
+            git --git-dir="$DEPLOY_ROOT/repo.git" show HEAD:infra/scripts/rollback.sh \
+              | bash -s -- "$DEPLOY_ROOT" "$RELEASE_TARGET"
+
+      - name: Verify health endpoint after rollback
+        run: |
+          for i in $(seq 1 10); do
+            if curl -sf "https://api.tokospace.com/health" > /dev/null; then
+              echo "Health check passed."
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::Health check failed after rollback."
+          exit 1
