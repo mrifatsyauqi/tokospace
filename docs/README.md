@@ -16,7 +16,7 @@ This folder contains the approved source-of-truth documentation for the Tokospac
 
 | ADR | Decision |
 |---|---|
-| [`adr/0001-gcp-cloud-sql-hosting-migration.md`](./adr/0001-gcp-cloud-sql-hosting-migration.md) | Google Compute Engine + Cloud SQL for PostgreSQL as hosting/database target, R2 retained, Secret Manager for production credentials |
+| [`adr/0001-gcp-cloud-sql-hosting-migration.md`](./adr/0001-gcp-cloud-sql-hosting-migration.md) | Target: Google Compute Engine + Cloud SQL for PostgreSQL + Google Cloud Storage (replacing R2) + Secret Manager for production credentials. Decision only — not yet implemented in the repository, see the ADR's Current State section |
 | [`adr/0002-tenant-rls-session-context.md`](./adr/0002-tenant-rls-session-context.md) | `SET LOCAL` inside an explicit transaction as the mandatory tenant-context pattern for the future Tenant module |
 
 ## Repository Architecture
@@ -34,7 +34,7 @@ tokospace/
 └── .github/workflows/       # Independent API/Web CI/CD
 ```
 
-The monorepo does not mean a single runtime or deployment. `apps/api` deploys to Google Compute Engine (with Google Cloud SQL for PostgreSQL as the managed database) and `apps/web` deploys to Vercel through independent pipelines.
+The monorepo does not mean a single runtime or deployment. `apps/api` targets Google Compute Engine (with Google Cloud SQL for PostgreSQL as the managed database) — approved per ADR-0001 but not yet implemented, see its Current State section — and `apps/web` deploys to Vercel through independent pipelines.
 
 ## Document Authority
 

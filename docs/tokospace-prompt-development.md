@@ -28,7 +28,7 @@ Sebelum menjalankan prompt tahap mana pun, Claude Code wajib membaca dan mengiku
 
 1. **Tenant isolation adalah aturan keamanan inti.** Semua data tenant-aware harus punya `tenant_id`, Global Scope aktif, Policy, PostgreSQL RLS, dan test cross-tenant.
 2. **Tenant context tidak boleh berasal langsung dari input client.** Public request di-resolve melalui `TenantResolver`; dashboard menggunakan tenant dari identity/session authenticated.
-3. **Media production selalu R2.** Jangan menyimpan foto produk, logo, banner, bukti transfer, invoice, import/export, atau media bisnis permanen di disk lokal Compute Engine.
+3. **Media production selalu ke disk object-storage produksi** (target Google Cloud Storage; saat ini R2 — lihat Tech Spec §1.1 / ADR-0001). Jangan menyimpan foto produk, logo, banner, bukti transfer, invoice, import/export, atau media bisnis permanen di disk lokal Compute Engine.
 4. **Payment context tidak boleh dicampur.** Gateway platform Tokospace hanya untuk subscription Tokospace; gateway tenant (Midtrans/Tripay) untuk customer membayar seller.
 5. **Order module tidak boleh bergantung langsung pada provider.** Gunakan `PaymentProviderInterface` / `ShippingProviderInterface` dan provider implementation.
 6. **Credential pihak ketiga tidak pernah dikirim ke browser atau ditulis ke source code.** Credential persisten harus encrypted di backend.
@@ -99,7 +99,7 @@ BACKEND — apps/api
 1. Setup Laravel 11 + PHP 8.3.
 2. Docker Compose: Nginx, PHP-FPM/Laravel, Redis, Horizon/worker, Cloud SQL Auth Proxy (produksi) — PostgreSQL 16 hanya sebagai service Docker tambahan untuk local dev (produksi memakai Google Cloud SQL for PostgreSQL, lihat Tech Spec §5).
 3. Semua resource-dependent settings lewat environment.
-4. Filesystems: local untuk temp/cache/log saja; R2 sebagai disk media production.
+4. Filesystems: local untuk temp/cache/log saja; disk object-storage produksi untuk media production (target GCS; Stage 0 yang sudah berjalan memakai R2 — lihat ADR-0001 untuk rencana migrasi).
 5. GET /health → HTTP 200 dan memeriksa koneksi DB + Redis.
 6. Pest + architecture test group.
 7. GitHub Actions API CI; deployment ke Google Compute Engine memakai release-folder + symlink + rollback-ready flow sesuai Tech Spec; database Cloud SQL for PostgreSQL diakses via Cloud SQL Auth Proxy.
@@ -187,7 +187,7 @@ BACKEND — apps/api
 3. Catalog Service + Repository.
 4. CRUD produk + variants.
 5. CSV import dengan preview + row validation.
-6. Upload media wajib ke R2.
+6. Upload media wajib ke disk object-storage produksi (target GCS).
 7. Public storefront endpoints resolve tenant melalui TenantResolver.
 8. Tidak ada query lintas tenant.
 
@@ -197,7 +197,7 @@ FRONTEND — apps/web
 3. Gunakan caching sesuai Tech Spec dan tag tenant/product.
 
 DoD:
-produk + media R2 berhasil dibuat, tampil di tenant storefront yang benar, dan isolation test tetap lulus.
+produk + media di object storage produksi berhasil dibuat, tampil di tenant storefront yang benar, dan isolation test tetap lulus.
 ```
 
 ---
@@ -218,7 +218,7 @@ BACKEND — apps/api
 5. Payment module: ManualPaymentProvider.
 6. Shipping module: ManualShippingProvider.
 7. PaymentProviderInterface dan ShippingProviderInterface dibuat SEKARANG.
-8. Semua upload bukti transfer → R2.
+8. Semua upload bukti transfer → disk object-storage produksi (target GCS).
 9. Order state transition harus tervalidasi dan audit/history dicatat.
 
 FRONTEND — apps/web
@@ -253,7 +253,7 @@ BACKEND — apps/api
 3. Starter gratis permanen; Pro/Business berbayar.
 4. Quota dan features berupa data.
 5. Grace period/read-only/suspend sesuai Master Plan.
-6. Theme config per tenant; media → R2.
+6. Theme config per tenant; media → disk object-storage produksi (target GCS).
 
 FRONTEND — apps/web
 1. Billing dashboard.
@@ -282,7 +282,7 @@ Ini GERBANG MVP RELEASE.
 4. N+1 audit endpoint kritis.
 5. Tenant isolation + RLS audit.
 6. Backup + restore test nyata.
-7. R2 media audit.
+7. Object storage media audit (target GCS).
 8. Lighthouse/performance test.
 9. Rollback test.
 10. Design Brief handoff checklist.
