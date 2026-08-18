@@ -69,7 +69,15 @@ jobs:
           coverage: none
 
       - name: Install pg_dump client (used by app:backup-database)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+        timeout-minutes: 3
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          if command -v pg_dump >/dev/null; then
+            echo "pg_dump already present on the runner ($(pg_dump --version)), skipping apt-get."
+            exit 0
+          fi
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
 
       - name: Install Composer dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
