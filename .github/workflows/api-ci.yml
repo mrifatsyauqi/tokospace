@@ -1,0 +1,98 @@
+name: API CI
+
+# Tech Spec §2.3 — only runs when apps/api (or infra it depends on) actually
+# changes. Docs-only or apps/web-only PRs never touch this workflow.
+on:
+  pull_request:
+    paths:
+      - "apps/api/**"
+      - "infra/docker/php/**"
+      - ".github/workflows/api-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/**"
+      - "infra/docker/php/**"
+      - ".github/workflows/api-ci.yml"
+
+defaults:
+  run:
+    working-directory: apps/api
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    env:
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_DATABASE: tokospace_test
+      DB_USERNAME: tokospace
+      DB_PASSWORD: tokospace
+      REDIS_HOST: 127.0.0.1
+      FILESYSTEM_DISK: local
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: tokospace_test
+          POSTGRES_USER: tokospace
+          POSTGRES_PASSWORD: tokospace
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tokospace"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pdo_pgsql, redis, bcmath, gd, zip
+          coverage: none
+
+      - name: Install pg_dump client (used by app:backup-database)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate --ansi
+
+      - name: Lint (Pint)
+        run: vendor/bin/pint --test
+
+      - name: Migrate
+        run: php artisan migrate --force
+
+      # NON-NEGOTIABLE rule #11: tests must actually run, not just compile —
+      # this includes the `arch` group (module boundary rules, Tech Spec §10),
+      # not a separate opt-in step someone can forget to add later.
+      - name: Test (Pest, including arch group)
+        run: vendor/bin/pest --ci
+
+      - name: Verify OpenAPI export is up to date
+        run: |
+          composer export-openapi
+          git diff --exit-code openapi.json || \
+            (echo "::error::openapi.json is stale — run 'composer export-openapi' and commit the result." && exit 1)
