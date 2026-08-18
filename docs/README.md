@@ -12,6 +12,13 @@ This folder contains the approved source-of-truth documentation for the Tokospac
 | [`tokospace-master-plan.md`](./tokospace-master-plan.md) | Development master plan — stage-by-stage build order, dependencies, repository/deployment strategy |
 | [`tokospace-prompt-development.md`](./tokospace-prompt-development.md) | Ready-to-use Claude Code prompts, one per development stage |
 
+## Architecture Decision Records
+
+| ADR | Decision |
+|---|---|
+| [`adr/0001-gcp-cloud-sql-hosting-migration.md`](./adr/0001-gcp-cloud-sql-hosting-migration.md) | Target: Google Compute Engine + Cloud SQL for PostgreSQL + Google Cloud Storage (replacing R2) + Secret Manager for production credentials. Decision only — not yet implemented in the repository, see the ADR's Current State section |
+| [`adr/0002-tenant-rls-session-context.md`](./adr/0002-tenant-rls-session-context.md) | `SET LOCAL` inside an explicit transaction as the mandatory tenant-context pattern for the future Tenant module |
+
 ## Repository Architecture
 
 Tokospace uses a **single monorepo**:
@@ -27,7 +34,7 @@ tokospace/
 └── .github/workflows/       # Independent API/Web CI/CD
 ```
 
-The monorepo does not mean a single runtime or deployment. `apps/api` deploys to the Oracle target environment and `apps/web` deploys to Vercel through independent pipelines.
+The monorepo does not mean a single runtime or deployment. `apps/api` targets Google Compute Engine (with Google Cloud SQL for PostgreSQL as the managed database) — approved per ADR-0001 but not yet implemented, see its Current State section — and `apps/web` deploys to Vercel through independent pipelines.
 
 ## Document Authority
 

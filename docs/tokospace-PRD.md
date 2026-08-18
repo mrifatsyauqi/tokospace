@@ -122,7 +122,7 @@ Tokospace memungkinkan seller UMKM membuat toko online sendiri tanpa coding — 
 - Varian dengan harga/stok independen.
 - CSV import dengan preview + validasi per baris.
 - Stok 0 → habis dan pembelian dinonaktifkan.
-- Semua media production disimpan di R2.
+- Semua media production disimpan di disk object-storage produksi (target Google Cloud Storage; saat ini masih R2 — lihat Tech Spec §1.1 / ADR-0001).
 
 ### 4.3 Pesanan — P0
 - Status: `baru → diproses → dikirim → selesai`, plus `dibatalkan` dan `diretur`.
@@ -241,13 +241,13 @@ Approve/suspend seller, monitoring toko, paket/feature/quota, monitoring integra
 - Scheduled jobs idempotent.
 - Payment webhook idempotent.
 - Backup terjadwal dan restore diuji.
-- R2 menjadi persistent media store.
+- Object storage produksi menjadi persistent media store (target Google Cloud Storage; saat ini R2 — lihat Tech Spec §1.1 / ADR-0001).
 
 ### 5.4 API Contract
 Laravel menghasilkan OpenAPI; Next.js generate types dari OpenAPI pada CI.
 
 ### 5.5 Portability
-Tidak ada hard dependency pada spek Oracle A1; infrastructure settings melalui environment/configuration.
+Tidak ada hard dependency pada spesifikasi VM/compute provider tertentu (Google Compute Engine); infrastructure settings melalui environment/configuration.
 
 ---
 
@@ -258,7 +258,7 @@ Tidak ada hard dependency pada spek Oracle A1; infrastructure settings melalui e
 - Error/loading/empty/partial states tersedia.
 - API contract terdokumentasi.
 - Tidak ada secret di source code.
-- Media production di R2.
+- Media production di disk object-storage produksi (target GCS; saat ini R2).
 - CI lulus.
 - Preview/target deployment berhasil.
 

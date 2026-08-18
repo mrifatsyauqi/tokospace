@@ -4,17 +4,26 @@
 |---|---|
 | **Produk** | Tokospace — SaaS Multi-Tenant E-Commerce Builder |
 | **Domain** | tokospace.com |
-| **Versi** | 2.3 |
-| **Tanggal** | 17 Agustus 2026 |
-| **Menggantikan** | `tokospace-tech-spec.md` v2.2 |
+| **Versi** | 2.4 |
+| **Tanggal** | 18 Agustus 2026 |
+| **Menggantikan** | `tokospace-tech-spec.md` v2.3 |
 | **Status** | **Approved — Development Baseline** |
 | **Selaras dengan** | `tokospace-PRD.md` v1.2, `tokospace-design-brief.md` v2.0, `tokospace-master-plan.md` v1.2, `tokospace-prompt-development.md` v1.3 |
+
+### Changelog v2.4
+- **Ini adalah architecture decision, bukan laporan implementasi.** Seluruh referensi Google Compute Engine/Cloud SQL/GCS/Cloud SQL Auth Proxy/Secret Manager di bawah adalah **TARGET architecture yang disetujui** (lihat `docs/adr/0001-gcp-cloud-sql-hosting-migration.md`). Repository saat ini (`main`) masih berada pada kondisi **pre-migration**: GitHub Secrets `ORACLE_SSH_HOST`/`ORACLE_SSH_USER`/`ORACLE_SSH_KEY`/`ORACLE_DEPLOY_ROOT` masih dipakai literal di `.github/workflows/api-deploy.yml` dan `rollback.yml`; `docker-compose.yml` masih memiliki service `postgres` self-hosted tanpa `cloud-sql-proxy`; `infra/scripts/deploy-release.sh` masih menjalankan `docker compose up -d postgres redis`; dan disk media production masih `r2` (Cloudflare R2) di `config/filesystems.php`. Implementasi kode untuk mencapai target ini adalah fase migrasi selanjutnya (Phase 5–8), di luar cakupan revisi dokumentasi ini.
+- Backend hosting: TARGET berpindah dari Oracle Cloud Infrastructure (Always Free target) ke **Google Compute Engine** (`asia-southeast2`) — perpindahan hosting/compute target, bukan migrasi engine database (PostgreSQL sudah menjadi database engine sejak awal).
+- Database: TARGET berpindah dari PostgreSQL self-hosted (Docker di VM) ke **Google Cloud SQL for PostgreSQL** (managed), diakses via Cloud SQL Auth Proxy (TCP, jaringan Docker Compose internal). Local development tetap memakai PostgreSQL self-hosted via Docker.
+- Object storage: TARGET berpindah dari Cloudflare R2 ke **Google Cloud Storage (GCS)**, sesuai komponen arsitektur Google Cloud yang disetujui pada master migration prompt. Migrasi terjadi di level abstraksi filesystem Laravel (`config/filesystems.php`), tanpa mengubah kontrak upload di application layer. R2 tetap yang dipakai kode saat ini sampai Phase 7 (Storage Migration) dieksekusi.
+- Secrets: TARGET kredensial produksi (`DB_PASSWORD`, kredensial GCS, dsb.) berpindah dari plaintext di `shared/apps-api.env` ke **Google Secret Manager**, diambil oleh GCE service account least-privilege (`Cloud SQL Client`, `Secret Manager Secret Accessor`).
+- Pola tenant-context RLS (`SET LOCAL` dalam transaksi eksplisit) dicatat formal di `docs/adr/0002-tenant-rls-session-context.md` sebagai syarat wajib sebelum modul Tenant dibangun (belum diimplementasikan — Stage 0 murni infrastruktur) — lihat §4.4.
+- Lihat `docs/adr/0001-gcp-cloud-sql-hosting-migration.md` untuk rasional lengkap dan pembagian current state/target state dari keputusan hosting/database/storage/secrets di atas.
 
 ---
 
 ## 0. Keputusan Final
 
-**Stack:** Laravel 11 API di Oracle Cloud target environment + Next.js 15 frontend di Vercel + PostgreSQL + Redis/Horizon + Cloudflare R2. GitHub menjadi source of truth dan menggunakan **satu monorepo Tokospace**. CI/CD backend dan frontend tetap independen berdasarkan path/perubahan aplikasi.
+**Stack (TARGET — lihat ADR-0001 untuk current state):** Laravel 11 API di Google Compute Engine (`asia-southeast2`) + Next.js 15 frontend di Vercel + Google Cloud SQL for PostgreSQL + Redis/Horizon (self-hosted di Compute Engine) + Google Cloud Storage. GitHub menjadi source of truth dan menggunakan **satu monorepo Tokospace**. CI/CD backend dan frontend tetap independen berdasarkan path/perubahan aplikasi.
 
 ### 0.1 Architecture Boundaries
 
@@ -29,7 +38,7 @@
 1. Next.js **tidak mengakses PostgreSQL langsung**; seluruh business/API access melalui Laravel.
 2. Semua data tenant-aware wajib `tenant_id` + Global Scope + Policy + PostgreSQL RLS.
 3. Tenant context untuk RLS tidak boleh berasal dari raw client input.
-4. Media production wajib R2; Oracle filesystem hanya transient.
+4. Media production wajib disk object-storage produksi (§1.1) — Laravel filesystem abstraction, bukan disk lokal transient VM.
 5. Payment customer→seller menggunakan credential seller sendiri (Midtrans/Tripay pada baseline). Payment subscription seller→Tokospace menggunakan gateway platform Tokospace. Dua context tidak boleh bercampur.
 6. Order module tidak boleh mengimpor SDK/provider langsung. Provider abstraction wajib dipakai.
 7. Webhook wajib signature-verified dan idempotent.
@@ -46,23 +55,26 @@
 |---|---|---|
 | Backend API | Laravel 11 + PHP 8.3 | Eloquent, Sanctum, Horizon, Scheduler |
 | Frontend | Next.js 15 + TypeScript | App Router, SSR/ISR, route groups |
-| Database | PostgreSQL 16 | Self-hosted pada Oracle target environment |
-| Cache/Queue broker | Redis | Laravel cache + Horizon |
+| Database | PostgreSQL 16 | TARGET: managed Google Cloud SQL for PostgreSQL (produksi) via Cloud SQL Auth Proxy; self-hosted Docker tetap dipakai untuk local dev. CURRENT: self-hosted Docker di produksi juga (belum bermigrasi — lihat ADR-0001) |
+| Cache/Queue broker | Redis | Laravel cache + Horizon; self-hosted Docker, tidak diekspos publik (tidak berubah oleh migrasi ini) |
 | Web server | Nginx + PHP-FPM | Backend reverse proxy |
 | Process manager | Supervisor | Menjaga Horizon/worker |
-| Storage | Cloudflare R2 | S3-compatible permanent media |
+| Storage | Google Cloud Storage | TARGET media production disk. CURRENT: Cloudflare R2 (`config/filesystems.php` disk `r2`) — migrasi disk belum dieksekusi, lihat ADR-0001 |
+| Secrets | Google Secret Manager | TARGET penyimpanan kredensial produksi (DB, storage, dll.), diambil GCE service account. CURRENT: plaintext di `shared/apps-api.env` server — belum bermigrasi |
 | Email | Resend | MVP provider |
 | Error tracking | Sentry | Backend + frontend |
 | Frontend hosting | Vercel | Auto-deploy dari GitHub monorepo |
-| Backend hosting | Oracle Cloud Always Free target | Docker Compose; tidak hard-dependent |
+| Backend hosting | Google Compute Engine (`asia-southeast2`) | TARGET environment; Docker Compose, tidak hard-dependent pada spesifikasi VM tertentu. Belum ada VM produksi yang di-provision — lihat ADR-0001 |
 
 ---
 
 ## 1.1 Storage Boundary
 
-**Permanent/business media → R2.**
+**Permanent/business media → disk object-storage produksi**, diakses melalui Laravel filesystem abstraction (`config/filesystems.php`), bukan SDK provider langsung — sehingga provider di baliknya dapat berpindah tanpa mengubah kontrak upload di application layer.
 
-R2 wajib digunakan untuk:
+TARGET disk object-storage produksi: **Google Cloud Storage**. CURRENT (belum bermigrasi): Cloudflare R2 (disk `r2`) — lihat ADR-0001.
+
+Disk ini wajib digunakan untuk:
 - foto produk/varian;
 - logo/banner/theme assets;
 - bukti transfer;
@@ -70,7 +82,7 @@ R2 wajib digunakan untuk:
 - import/export files;
 - dokumen bisnis permanen lainnya.
 
-Oracle local disk hanya:
+Compute Engine local disk hanya:
 - temp upload/process;
 - application/web logs;
 - framework cache;
@@ -103,9 +115,11 @@ tokospace/
 Monorepo **tidak berarti satu application**.
 
 ```text
-apps/api → Laravel → PostgreSQL/Redis/R2 → Oracle
+apps/api → Laravel → Cloud SQL (PostgreSQL) / Redis / GCS → Google Compute Engine   [TARGET]
 apps/web → Next.js → Laravel API → Vercel
 ```
+
+TARGET — lihat ADR-0001 untuk current state (masih Postgres self-hosted + R2, belum ada VM produksi ter-provision).
 
 Rules:
 
@@ -142,7 +156,7 @@ apps/api/**
   ↓
 API CI
   ↓
-API deployment → Oracle
+API deployment → Google Compute Engine   [TARGET — CURRENT: workflow masih membaca secrets.ORACLE_*, lihat ADR-0001]
 
 apps/web/**
   ↓
@@ -169,20 +183,25 @@ Perubahan `docs/**` saja tidak boleh memicu deployment aplikasi. Perubahan `infr
                            ▼
                     api.tokospace.com
                            │
-                   ORACLE TARGET ENV
+       GOOGLE COMPUTE ENGINE TARGET ENV (asia-southeast2)
                            │
           ┌────────────────┼────────────────┐
           ▼                ▼                ▼
-       Laravel          PostgreSQL        Redis
-       API/Auth/         database         cache/queue
-       business logic                     │
-                                          ▼
-                                       Horizon
+       Laravel      Cloud SQL Auth        Redis
+       API/Auth/        Proxy           cache/queue
+       business logic     │                 │
+                           │                 ▼
+                           │              Horizon
+                           ▼
+                Google Cloud SQL for PostgreSQL
+                (managed, private tunnel via proxy)
                            │
                            ▼
-                    Cloudflare R2
+                  Google Cloud Storage
                     permanent media
 ```
+
+Seluruh diagram di atas adalah **TARGET** — belum ada VM produksi ter-provision saat ini; repository masih berjalan dengan Postgres self-hosted dan Cloudflare R2 (lihat `docs/adr/0001-gcp-cloud-sql-hosting-migration.md` §Current State).
 
 ---
 
@@ -280,29 +299,45 @@ RLS tests wajib membuktikan:
 - tenant A tidak dapat UPDATE/DELETE tenant B;
 - privileged Super Admin path adalah explicit dan teruji.
 
-Detail mekanisme PostgreSQL session context yang dipilih saat implementasi harus dicatat dalam ADR dan tidak boleh diganti diam-diam.
+Mekanisme yang dipilih: `SET LOCAL app.tenant_id = ?` di dalam transaksi eksplisit yang membungkus setiap request/job tenant-scoped — dicatat formal di `docs/adr/0002-tenant-rls-session-context.md`. `SET LOCAL` otomatis ter-reset saat transaksi berakhir (commit/rollback), sehingga aman dipakai ulang pada koneksi yang sama oleh request/job berikutnya tanpa reset manual — penting khususnya untuk worker Horizon yang me-reuse satu koneksi PDO lintas banyak job. Cloud SQL Auth Proxy adalah tunnel TCP transparan dan tidak mengubah semantik session/transaction ini. Pola ini wajib dipatuhi saat modul Tenant diimplementasikan dan tidak boleh diganti diam-diam.
 
 ---
 
 ## 5. Infrastructure Portability
 
-Oracle adalah **target environment**, bukan hard dependency.
+Google Compute Engine adalah **target environment** untuk aplikasi (Laravel, Redis, Horizon), bukan hard dependency — arsitektur tetap portable ke VM/compute provider lain selama Docker Compose dan environment-driven tuning dipertahankan.
 
-Semua service backend dibungkus Docker Compose:
+**TARGET** — database produksi menggunakan **Google Cloud SQL for PostgreSQL** (managed), PostgreSQL tidak lagi dijalankan sebagai service Docker di jalur produksi. **CURRENT** — `docker-compose.yml` masih menjalankan `postgres` sebagai service self-hosted di jalur produksi juga; migrasi ke Cloud SQL belum diimplementasikan. Lihat `docs/adr/0001-gcp-cloud-sql-hosting-migration.md` untuk rincian.
+
+**TARGET** — service backend produksi dibungkus Docker Compose di Compute Engine:
 - Nginx
 - PHP-FPM
 - Laravel
-- PostgreSQL
+- Cloud SQL Auth Proxy (tunnel TCP ke Cloud SQL for PostgreSQL, jaringan Compose internal)
 - Redis
 - Horizon/worker
+
+Local development akan tetap menjalankan PostgreSQL sebagai service Docker tambahan (bukan Cloud SQL) melalui compose override file setelah implementasi — lihat `infra/README.md`. Ini akan menjadi satu-satunya perbedaan topologi antara local dev dan produksi setelah migrasi selesai. **Saat ini** (sebelum implementasi) `docker-compose.yml` belum di-split; tidak ada `cloud-sql-proxy` maupun compose override file.
 
 Environment-driven resource tuning:
 
 ```text
-DB_* / POSTGRES_* / PHP_FPM_* / REDIS_* / HORIZON_*
+DB_* / PHP_FPM_* / REDIS_* / HORIZON_*
 ```
 
-Tidak boleh ada kode aplikasi yang mengasumsikan CPU/RAM Oracle tertentu.
+(`POSTGRES_*` hanya relevan pada override compose local dev, karena Cloud SQL mengelola tuning-nya sendiri di sisi managed service.)
+
+Tidak boleh ada kode aplikasi yang mengasumsikan CPU/RAM VM tertentu.
+
+### 5.1 Region & Cost Guardrails
+
+TARGET — belum ada resource yang di-provision di GCP saat ini; bagian ini adalah acuan untuk provisioning di fase implementasi.
+
+- Region produksi: `asia-southeast2` (Jakarta) — dipilih untuk latency terbaik ke pengguna Indonesia. Region adalah parameter provisioning/infrastructure, tidak boleh di-hardcode pada application code.
+- Resource yang mengonsumsi kredit trial: Compute Engine VM (berjalan 24/7), Cloud SQL instance (berjalan 24/7 termasuk storage), Cloud Storage bucket (storage + egress bandwidth setelah migrasi dari R2 dieksekusi).
+- Resource yang berpotensi menimbulkan biaya berkelanjutan setelah trial berakhir: Compute Engine VM, Cloud SQL instance, Cloud SQL automated backup storage, Cloud Storage (storage + egress — beda dari R2 yang tanpa biaya egress; jadikan pertimbangan cost saat Phase 7 Storage Migration dieksekusi).
+- Resource yang tidak dibuat pada baseline ini (tidak ada kebutuhan bisnis yang mensyaratkan): load balancer, Kubernetes, multi-region, Memorystore, CDN, Cloud SQL read replica.
+- Billing monitoring: budget alert GCP Console wajib dikonfigurasi sebelum provisioning — didokumentasikan sebagai langkah setup di `infra/README.md`, bukan bagian source code.
 
 ---
 
@@ -593,12 +628,12 @@ Laravel upload authorization
   ↓
 presigned/direct upload atau server upload sesuai kebutuhan
   ↓
-R2
+disk object-storage produksi (TARGET: GCS · CURRENT: R2 — lihat ADR-0001)
   ↓
 metadata/key disimpan PostgreSQL
 ```
 
-File permanent tidak pernah menjadi dependency filesystem Oracle.
+File permanent tidak pernah menjadi dependency filesystem lokal Compute Engine.
 
 ---
 
@@ -612,7 +647,7 @@ Backup harus:
 - stored separately from primary database disk;
 - tested by restoring at least one sample backup before MVP Release.
 
-R2 data retention/backup mengikuti object-storage policy provider; application metadata harus tetap menyimpan object key yang dapat direkonstruksi.
+Data retention/backup pada disk object-storage produksi mengikuti policy provider yang sedang dipakai (TARGET: GCS · CURRENT: R2); application metadata harus tetap menyimpan object key yang dapat direkonstruksi terlepas dari provider.
 
 ---
 
@@ -629,8 +664,11 @@ R2 data retention/backup mengikuti object-storage policy provider; application m
 - Laravel Policies.
 - No secrets in source.
 - File type/size validation.
-- R2 upload authorization.
+- Object-storage upload authorization.
 - Audit logs untuk aksi privileged penting.
+- TARGET, belum diimplementasikan (lihat ADR-0001): kredensial produksi (DB, object storage) di Google Secret Manager, bukan file plaintext di disk VM.
+- TARGET: GCE service account least-privilege (`Cloud SQL Client`, `Secret Manager Secret Accessor`), bukan default service account.
+- TARGET: Cloud SQL diakses via Cloud SQL Auth Proxy (autentikasi IAM), tidak diekspos ke internet publik.
 
 ---
 
@@ -644,7 +682,7 @@ preview/staging
 production
 ```
 
-Environment secrets disimpan pada secret manager/platform masing-masing, bukan repository.
+Environment secrets disimpan pada secret manager/platform masing-masing, bukan repository — TARGET: Google Secret Manager untuk backend/Compute Engine (CURRENT: plaintext di `shared/apps-api.env`, lihat ADR-0001), Vercel environment variables untuk frontend (tidak berubah).
 
 ---
 
@@ -659,5 +697,6 @@ Tahap 0 boleh dimulai setelah:
 - D1/D2/D3 final.
 - Monorepo strategy final: `apps/api` + `apps/web` dalam satu repository.
 - Domain foundation dipastikan Tahap 1.
-- RLS tenant context implementation strategy dicatat sebagai ADR sebelum modul tenant selesai.
+- RLS tenant context implementation strategy (`SET LOCAL` dalam transaksi) sudah dicatat sebagai ADR (`docs/adr/0002-tenant-rls-session-context.md`) sebelum modul tenant dibangun.
+- Hosting/database/secrets target (Google Compute Engine, Cloud SQL for PostgreSQL, Secret Manager) sudah dicatat sebagai ADR (`docs/adr/0001-gcp-cloud-sql-hosting-migration.md`).
 

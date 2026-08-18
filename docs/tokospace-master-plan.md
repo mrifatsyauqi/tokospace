@@ -5,7 +5,7 @@
 | **Produk** | Tokospace — SaaS Multi-Tenant E-Commerce Builder |
 | **Versi** | 1.2 |
 | **Tanggal** | 17 Agustus 2026 |
-| **Mengikat** | `tokospace-PRD.md` v1.2 · `tokospace-design-brief.md` v2.0 · `tokospace-tech-spec.md` v2.3 |
+| **Mengikat** | `tokospace-PRD.md` v1.2 · `tokospace-design-brief.md` v2.0 · `tokospace-tech-spec.md` v2.4 |
 | **Pasangan dokumen** | `tokospace-prompt-development.md` v1.3 — prompt siap pakai per tahap |
 | **Status** | **Approved — Development Baseline** |
 
@@ -49,7 +49,7 @@ apps/api/**
    ↓
 API CI
    ↓
-Oracle deployment
+Google Compute Engine deployment
 
 apps/web/**
    ↓
@@ -65,7 +65,7 @@ apps/web
    ↓ HTTPS
 apps/api
    ↓
-PostgreSQL / Redis / R2
+PostgreSQL / Redis / object storage produksi (target GCS; saat ini R2)
 ```
 
 `apps/web` tidak boleh mengakses database atau internal Laravel classes secara langsung.
@@ -191,11 +191,11 @@ Menghasilkan tempat fitur dibangun.
 
 ### Tahap 2 — Katalog Produk
 
-**Backend:** categories, products, variants, stock, CSV import, R2 media.
+**Backend:** categories, products, variants, stock, CSV import, media di object storage produksi (target GCS — lihat Tech Spec §1.1 / ADR-0001).
 
 **Frontend:** product dashboard, catalog, product detail.
 
-**DoD:** seller dapat membuat produk lengkap dengan gambar R2 dan produk muncul di storefront; no cross-tenant access.
+**DoD:** seller dapat membuat produk lengkap dengan gambar tersimpan di object storage produksi dan produk muncul di storefront; no cross-tenant access.
 
 ### Tahap 3 — Pesanan & Transaksi Manual
 
@@ -225,7 +225,7 @@ Ini adalah **gerbang resmi MVP Release**.
 - N+1 audit
 - tenant isolation audit
 - backup + restore test
-- R2 media audit
+- object storage media audit (target GCS)
 - Lighthouse/performance test
 - design handoff checklist
 - rollback test
@@ -297,7 +297,7 @@ Sebelum Fase 1:
 - [ ] Tenant isolation lulus CI
 - [ ] RLS tenant context diuji
 - [ ] Concurrent stock reservation lulus test
-- [ ] Semua media production berada di R2
+- [ ] Semua media production berada di object storage produksi (target GCS; saat ini R2 — lihat ADR-0001)
 - [ ] Backup + restore berhasil diuji
 - [ ] Lighthouse/performance target tercapai
 - [ ] Rollback pernah diuji
