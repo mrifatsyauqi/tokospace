@@ -14,7 +14,6 @@ const ROOT_DOMAIN_DEV = "localhost";
 export function middleware(request: NextRequest) {
   const hostname = request.headers.get("host") ?? "";
   const host = hostname.split(":")[0];
-  const { pathname } = request.nextUrl;
 
   const rootDomain = host.endsWith(ROOT_DOMAIN_DEV)
     ? ROOT_DOMAIN_DEV
@@ -24,20 +23,23 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Clone rather than build from pathname alone — a fresh `new URL(pathname,
+  // request.url)` silently drops the query string (?next=, UTM params, etc).
+  const rewritten = request.nextUrl.clone();
+
   if (host === `app.${rootDomain}`) {
-    return NextResponse.rewrite(
-      new URL(`/dashboard${pathname}`, request.url),
-    );
+    rewritten.pathname = `/dashboard${rewritten.pathname}`;
+    return NextResponse.rewrite(rewritten);
   }
 
   if (host === `admin.${rootDomain}`) {
-    return NextResponse.rewrite(new URL(`/admin${pathname}`, request.url));
+    rewritten.pathname = `/admin${rewritten.pathname}`;
+    return NextResponse.rewrite(rewritten);
   }
 
   const tenant = host.replace(`.${rootDomain}`, "");
-  return NextResponse.rewrite(
-    new URL(`/s/${tenant}${pathname}`, request.url),
-  );
+  rewritten.pathname = `/s/${tenant}${rewritten.pathname}`;
+  return NextResponse.rewrite(rewritten);
 }
 
 export const config = {

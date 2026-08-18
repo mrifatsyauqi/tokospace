@@ -50,27 +50,46 @@ class BackupDatabase extends Command
      */
     private function dumpAndUpload(array $connection): void
     {
-        $filename = sprintf('%s.sql.gz', now()->format('Y-m-d_His'));
-        $localPath = storage_path('app/private/'.$filename);
+        $timestamp = now()->format('Y-m-d_His');
+        $filename = "{$timestamp}.sql.gz";
+        $sqlPath = storage_path("app/private/{$timestamp}.sql");
+        $localPath = $sqlPath.'.gz';
 
         $this->info("Dumping database to {$filename}...");
 
-        $pipeline = Process::fromShellCommandline(
+        // pg_dump and gzip run as two separate, independently-checked
+        // processes rather than a shell pipe: `pg_dump | gzip > file` would
+        // report the exit status of gzip (the last command in the pipe), so
+        // a failed/truncated pg_dump — bad host, dropped connection mid-dump
+        // — could still produce and upload a "successful" empty backup.
+        $dump = Process::fromShellCommandline(
             sprintf(
-                'PGPASSWORD=%s pg_dump --host=%s --port=%s --username=%s --no-password --format=plain %s | gzip > %s',
+                'PGPASSWORD=%s pg_dump --host=%s --port=%s --username=%s --no-password --format=plain %s > %s',
                 escapeshellarg($connection['password']),
                 escapeshellarg($connection['host']),
                 escapeshellarg((string) $connection['port']),
                 escapeshellarg($connection['username']),
                 escapeshellarg($connection['database']),
-                escapeshellarg($localPath),
+                escapeshellarg($sqlPath),
             )
         );
-        $pipeline->setTimeout(600);
-        $pipeline->run();
+        $dump->setTimeout(600);
+        $dump->run();
 
-        if (! $pipeline->isSuccessful()) {
-            throw new RuntimeException('Backup pipeline failed: '.$pipeline->getErrorOutput());
+        if (! $dump->isSuccessful()) {
+            @unlink($sqlPath);
+
+            throw new RuntimeException('pg_dump failed: '.$dump->getErrorOutput());
+        }
+
+        $gzip = new Process(['gzip', '--force', $sqlPath]);
+        $gzip->setTimeout(600);
+        $gzip->run();
+
+        if (! $gzip->isSuccessful()) {
+            @unlink($sqlPath);
+
+            throw new RuntimeException('gzip failed: '.$gzip->getErrorOutput());
         }
 
         $this->info('Uploading to R2...');

@@ -10,8 +10,8 @@ dev` inside `apps/web`.
 cp .env.example .env
 infra/scripts/tune.sh          # fills in POSTGRES_SHARED_BUFFERS, PHP_FPM_MAX_CHILDREN, etc.
 cp apps/api/.env.example apps/api/.env
-php -r "echo bin2hex(random_bytes(16));"   # or: cd apps/api && php artisan key:generate
-docker compose up -d --build
+docker compose up -d --build   # first boot auto-runs `composer install` — no vendor/ on the host needed
+docker compose exec php php artisan key:generate
 curl http://localhost:8000/health
 ```
 
