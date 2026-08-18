@@ -5,7 +5,7 @@
 | **Produk** | Tokospace — SaaS Multi-Tenant E-Commerce Builder |
 | **Versi** | 1.2 |
 | **Tanggal** | 17 Agustus 2026 |
-| **Mengikat** | `tokospace-PRD.md` v1.2 · `tokospace-design-brief.md` v2.0 · `tokospace-tech-spec.md` v2.3 |
+| **Mengikat** | `tokospace-PRD.md` v1.2 · `tokospace-design-brief.md` v2.0 · `tokospace-tech-spec.md` v2.4 |
 | **Pasangan dokumen** | `tokospace-prompt-development.md` v1.3 — prompt siap pakai per tahap |
 | **Status** | **Approved — Development Baseline** |
 
@@ -49,7 +49,7 @@ apps/api/**
    ↓
 API CI
    ↓
-Oracle deployment
+Google Compute Engine deployment
 
 apps/web/**
    ↓

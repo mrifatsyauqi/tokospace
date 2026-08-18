@@ -20,7 +20,7 @@ Sebelum menjalankan prompt tahap mana pun, Claude Code wajib membaca dan mengiku
 5. Jangan menjalankan `git init` ulang pada repository yang sudah ada.
 6. `apps/api` dan `apps/web` tetap merupakan application boundaries terpisah walaupun berada dalam satu Git repository.
 7. Frontend tidak boleh mengakses PostgreSQL, Redis, atau internal Laravel classes secara langsung.
-8. Deployment API → Oracle dan Web → Vercel tetap independen.
+8. Deployment API → Google Compute Engine dan Web → Vercel tetap independen.
 9. Shared code hanya boleh dibuat di `packages/` bila benar-benar reusable dan tidak membocorkan backend internals.
 10. API contract berasal dari Laravel/OpenAPI; frontend tidak boleh mendefinisikan ulang response contract secara manual jika generated types tersedia.
 
@@ -28,7 +28,7 @@ Sebelum menjalankan prompt tahap mana pun, Claude Code wajib membaca dan mengiku
 
 1. **Tenant isolation adalah aturan keamanan inti.** Semua data tenant-aware harus punya `tenant_id`, Global Scope aktif, Policy, PostgreSQL RLS, dan test cross-tenant.
 2. **Tenant context tidak boleh berasal langsung dari input client.** Public request di-resolve melalui `TenantResolver`; dashboard menggunakan tenant dari identity/session authenticated.
-3. **Media production selalu R2.** Jangan menyimpan foto produk, logo, banner, bukti transfer, invoice, import/export, atau media bisnis permanen di disk lokal Oracle.
+3. **Media production selalu R2.** Jangan menyimpan foto produk, logo, banner, bukti transfer, invoice, import/export, atau media bisnis permanen di disk lokal Compute Engine.
 4. **Payment context tidak boleh dicampur.** Gateway platform Tokospace hanya untuk subscription Tokospace; gateway tenant (Midtrans/Tripay) untuk customer membayar seller.
 5. **Order module tidak boleh bergantung langsung pada provider.** Gunakan `PaymentProviderInterface` / `ShippingProviderInterface` dan provider implementation.
 6. **Credential pihak ketiga tidak pernah dikirim ke browser atau ditulis ke source code.** Credential persisten harus encrypted di backend.
@@ -97,12 +97,12 @@ REPOSITORY FOUNDATION
 
 BACKEND — apps/api
 1. Setup Laravel 11 + PHP 8.3.
-2. Docker Compose: Nginx, PHP-FPM/Laravel, PostgreSQL 16, Redis, Horizon/worker.
+2. Docker Compose: Nginx, PHP-FPM/Laravel, Redis, Horizon/worker, Cloud SQL Auth Proxy (produksi) — PostgreSQL 16 hanya sebagai service Docker tambahan untuk local dev (produksi memakai Google Cloud SQL for PostgreSQL, lihat Tech Spec §5).
 3. Semua resource-dependent settings lewat environment.
 4. Filesystems: local untuk temp/cache/log saja; R2 sebagai disk media production.
 5. GET /health → HTTP 200 dan memeriksa koneksi DB + Redis.
 6. Pest + architecture test group.
-7. GitHub Actions API CI; deployment ke Oracle memakai release-folder + symlink + rollback-ready flow sesuai Tech Spec.
+7. GitHub Actions API CI; deployment ke Google Compute Engine memakai release-folder + symlink + rollback-ready flow sesuai Tech Spec; database Cloud SQL for PostgreSQL diakses via Cloud SQL Auth Proxy.
 8. Backup PostgreSQL terjadwal; backup media/database mengikuti kebijakan Tech Spec.
 
 FRONTEND — apps/web

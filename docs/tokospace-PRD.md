@@ -247,7 +247,7 @@ Approve/suspend seller, monitoring toko, paket/feature/quota, monitoring integra
 Laravel menghasilkan OpenAPI; Next.js generate types dari OpenAPI pada CI.
 
 ### 5.5 Portability
-Tidak ada hard dependency pada spek Oracle A1; infrastructure settings melalui environment/configuration.
+Tidak ada hard dependency pada spesifikasi VM/compute provider tertentu (Google Compute Engine); infrastructure settings melalui environment/configuration.
 
 ---
 

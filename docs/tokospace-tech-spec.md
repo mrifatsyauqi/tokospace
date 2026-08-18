@@ -4,17 +4,25 @@
 |---|---|
 | **Produk** | Tokospace — SaaS Multi-Tenant E-Commerce Builder |
 | **Domain** | tokospace.com |
-| **Versi** | 2.3 |
-| **Tanggal** | 17 Agustus 2026 |
-| **Menggantikan** | `tokospace-tech-spec.md` v2.2 |
+| **Versi** | 2.4 |
+| **Tanggal** | 18 Agustus 2026 |
+| **Menggantikan** | `tokospace-tech-spec.md` v2.3 |
 | **Status** | **Approved — Development Baseline** |
 | **Selaras dengan** | `tokospace-PRD.md` v1.2, `tokospace-design-brief.md` v2.0, `tokospace-master-plan.md` v1.2, `tokospace-prompt-development.md` v1.3 |
+
+### Changelog v2.4
+- Backend hosting berpindah dari Oracle Cloud Infrastructure (Always Free target) ke **Google Compute Engine** (`asia-southeast2`) — perpindahan hosting/compute target, bukan migrasi engine database (PostgreSQL sudah menjadi database engine sejak awal).
+- Database produksi berpindah dari PostgreSQL self-hosted (Docker di VM) ke **Google Cloud SQL for PostgreSQL** (managed), diakses via Cloud SQL Auth Proxy (TCP, jaringan Docker Compose internal). Local development tetap memakai PostgreSQL self-hosted via Docker.
+- Kredensial produksi (`DB_PASSWORD`, kredensial R2, dsb.) berpindah dari plaintext di `shared/apps-api.env` ke **Google Secret Manager**, diambil oleh GCE service account least-privilege (`Cloud SQL Client`, `Secret Manager Secret Accessor`).
+- Cloudflare R2 **dipertahankan** sebagai media storage — tidak diganti Google Cloud Storage (tidak ada kebutuhan bisnis yang mensyaratkan penggantian; R2 tanpa biaya egress).
+- Pola tenant-context RLS (`SET LOCAL` dalam transaksi eksplisit) dicatat formal di `docs/adr/0002-tenant-rls-session-context.md` sebagai syarat wajib sebelum modul Tenant dibangun — lihat §4.4.
+- Lihat `docs/adr/0001-gcp-cloud-sql-hosting-migration.md` untuk rasional lengkap keputusan hosting/database/secrets di atas.
 
 ---
 
 ## 0. Keputusan Final
 
-**Stack:** Laravel 11 API di Oracle Cloud target environment + Next.js 15 frontend di Vercel + PostgreSQL + Redis/Horizon + Cloudflare R2. GitHub menjadi source of truth dan menggunakan **satu monorepo Tokospace**. CI/CD backend dan frontend tetap independen berdasarkan path/perubahan aplikasi.
+**Stack:** Laravel 11 API di Google Compute Engine (`asia-southeast2`) + Next.js 15 frontend di Vercel + Google Cloud SQL for PostgreSQL + Redis/Horizon (self-hosted di Compute Engine) + Cloudflare R2. GitHub menjadi source of truth dan menggunakan **satu monorepo Tokospace**. CI/CD backend dan frontend tetap independen berdasarkan path/perubahan aplikasi.
 
 ### 0.1 Architecture Boundaries
 
@@ -29,7 +37,7 @@
 1. Next.js **tidak mengakses PostgreSQL langsung**; seluruh business/API access melalui Laravel.
 2. Semua data tenant-aware wajib `tenant_id` + Global Scope + Policy + PostgreSQL RLS.
 3. Tenant context untuk RLS tidak boleh berasal dari raw client input.
-4. Media production wajib R2; Oracle filesystem hanya transient.
+4. Media production wajib R2; filesystem lokal Compute Engine hanya transient.
 5. Payment customer→seller menggunakan credential seller sendiri (Midtrans/Tripay pada baseline). Payment subscription seller→Tokospace menggunakan gateway platform Tokospace. Dua context tidak boleh bercampur.
 6. Order module tidak boleh mengimpor SDK/provider langsung. Provider abstraction wajib dipakai.
 7. Webhook wajib signature-verified dan idempotent.
@@ -46,15 +54,16 @@
 |---|---|---|
 | Backend API | Laravel 11 + PHP 8.3 | Eloquent, Sanctum, Horizon, Scheduler |
 | Frontend | Next.js 15 + TypeScript | App Router, SSR/ISR, route groups |
-| Database | PostgreSQL 16 | Self-hosted pada Oracle target environment |
-| Cache/Queue broker | Redis | Laravel cache + Horizon |
+| Database | PostgreSQL 16 | Managed — Google Cloud SQL for PostgreSQL (produksi); self-hosted Docker (local dev) |
+| Cache/Queue broker | Redis | Laravel cache + Horizon; self-hosted Docker, tidak diekspos publik |
 | Web server | Nginx + PHP-FPM | Backend reverse proxy |
 | Process manager | Supervisor | Menjaga Horizon/worker |
 | Storage | Cloudflare R2 | S3-compatible permanent media |
+| Secrets | Google Secret Manager | Kredensial produksi (DB, R2, dll.); diambil GCE service account, tidak persisten di disk VM |
 | Email | Resend | MVP provider |
 | Error tracking | Sentry | Backend + frontend |
 | Frontend hosting | Vercel | Auto-deploy dari GitHub monorepo |
-| Backend hosting | Oracle Cloud Always Free target | Docker Compose; tidak hard-dependent |
+| Backend hosting | Google Compute Engine (`asia-southeast2`) | Docker Compose; tidak hard-dependent pada spesifikasi VM tertentu |
 
 ---
 
@@ -70,7 +79,7 @@ R2 wajib digunakan untuk:
 - import/export files;
 - dokumen bisnis permanen lainnya.
 
-Oracle local disk hanya:
+Compute Engine local disk hanya:
 - temp upload/process;
 - application/web logs;
 - framework cache;
@@ -103,7 +112,7 @@ tokospace/
 Monorepo **tidak berarti satu application**.
 
 ```text
-apps/api → Laravel → PostgreSQL/Redis/R2 → Oracle
+apps/api → Laravel → Cloud SQL (PostgreSQL) / Redis / R2 → Google Compute Engine
 apps/web → Next.js → Laravel API → Vercel
 ```
 
@@ -142,7 +151,7 @@ apps/api/**
   ↓
 API CI
   ↓
-API deployment → Oracle
+API deployment → Google Compute Engine
 
 apps/web/**
   ↓
@@ -169,15 +178,18 @@ Perubahan `docs/**` saja tidak boleh memicu deployment aplikasi. Perubahan `infr
                            ▼
                     api.tokospace.com
                            │
-                   ORACLE TARGET ENV
+          GOOGLE COMPUTE ENGINE (asia-southeast2)
                            │
           ┌────────────────┼────────────────┐
           ▼                ▼                ▼
-       Laravel          PostgreSQL        Redis
-       API/Auth/         database         cache/queue
-       business logic                     │
-                                          ▼
-                                       Horizon
+       Laravel      Cloud SQL Auth        Redis
+       API/Auth/        Proxy           cache/queue
+       business logic     │                 │
+                           │                 ▼
+                           │              Horizon
+                           ▼
+                Google Cloud SQL for PostgreSQL
+                (managed, private tunnel via proxy)
                            │
                            ▼
                     Cloudflare R2
@@ -280,29 +292,43 @@ RLS tests wajib membuktikan:
 - tenant A tidak dapat UPDATE/DELETE tenant B;
 - privileged Super Admin path adalah explicit dan teruji.
 
-Detail mekanisme PostgreSQL session context yang dipilih saat implementasi harus dicatat dalam ADR dan tidak boleh diganti diam-diam.
+Mekanisme yang dipilih: `SET LOCAL app.tenant_id = ?` di dalam transaksi eksplisit yang membungkus setiap request/job tenant-scoped — dicatat formal di `docs/adr/0002-tenant-rls-session-context.md`. `SET LOCAL` otomatis ter-reset saat transaksi berakhir (commit/rollback), sehingga aman dipakai ulang pada koneksi yang sama oleh request/job berikutnya tanpa reset manual — penting khususnya untuk worker Horizon yang me-reuse satu koneksi PDO lintas banyak job. Cloud SQL Auth Proxy adalah tunnel TCP transparan dan tidak mengubah semantik session/transaction ini. Pola ini wajib dipatuhi saat modul Tenant diimplementasikan dan tidak boleh diganti diam-diam.
 
 ---
 
 ## 5. Infrastructure Portability
 
-Oracle adalah **target environment**, bukan hard dependency.
+Google Compute Engine adalah **target environment** untuk aplikasi (Laravel, Redis, Horizon), bukan hard dependency — arsitektur tetap portable ke VM/compute provider lain selama Docker Compose dan environment-driven tuning dipertahankan.
 
-Semua service backend dibungkus Docker Compose:
+Database produksi menggunakan **Google Cloud SQL for PostgreSQL** (managed) — lihat `docs/adr/0001-gcp-cloud-sql-hosting-migration.md`. PostgreSQL tidak lagi dijalankan sebagai service Docker di jalur produksi.
+
+Service backend produksi dibungkus Docker Compose di Compute Engine:
 - Nginx
 - PHP-FPM
 - Laravel
-- PostgreSQL
+- Cloud SQL Auth Proxy (tunnel TCP ke Cloud SQL for PostgreSQL, jaringan Compose internal)
 - Redis
 - Horizon/worker
+
+Local development menjalankan PostgreSQL sebagai service Docker tambahan (bukan Cloud SQL) melalui compose override file — lihat `infra/README.md`. Ini satu-satunya perbedaan topologi antara local dev dan produksi.
 
 Environment-driven resource tuning:
 
 ```text
-DB_* / POSTGRES_* / PHP_FPM_* / REDIS_* / HORIZON_*
+DB_* / PHP_FPM_* / REDIS_* / HORIZON_*
 ```
 
-Tidak boleh ada kode aplikasi yang mengasumsikan CPU/RAM Oracle tertentu.
+(`POSTGRES_*` hanya relevan pada override compose local dev, karena Cloud SQL mengelola tuning-nya sendiri di sisi managed service.)
+
+Tidak boleh ada kode aplikasi yang mengasumsikan CPU/RAM VM tertentu.
+
+### 5.1 Region & Cost Guardrails
+
+- Region produksi: `asia-southeast2` (Jakarta) — dipilih untuk latency terbaik ke pengguna Indonesia. Region adalah parameter provisioning/infrastructure, tidak boleh di-hardcode pada application code.
+- Resource yang mengonsumsi kredit trial: Compute Engine VM (berjalan 24/7), Cloud SQL instance (berjalan 24/7 termasuk storage), egress bandwidth di luar R2.
+- Resource yang berpotensi menimbulkan biaya berkelanjutan setelah trial berakhir: Compute Engine VM, Cloud SQL instance, Cloud SQL automated backup storage.
+- Resource yang tidak dibuat pada baseline ini (tidak ada kebutuhan bisnis yang mensyaratkan): load balancer, Kubernetes, multi-region, Memorystore, CDN, Cloud SQL read replica.
+- Billing monitoring: budget alert GCP Console wajib dikonfigurasi sebelum provisioning — didokumentasikan sebagai langkah setup di `infra/README.md`, bukan bagian source code.
 
 ---
 
@@ -598,7 +624,7 @@ R2
 metadata/key disimpan PostgreSQL
 ```
 
-File permanent tidak pernah menjadi dependency filesystem Oracle.
+File permanent tidak pernah menjadi dependency filesystem lokal Compute Engine.
 
 ---
 
@@ -631,6 +657,9 @@ R2 data retention/backup mengikuti object-storage policy provider; application m
 - File type/size validation.
 - R2 upload authorization.
 - Audit logs untuk aksi privileged penting.
+- Kredensial produksi (DB, R2) di Google Secret Manager, bukan file plaintext di disk VM.
+- GCE service account least-privilege (`Cloud SQL Client`, `Secret Manager Secret Accessor`), bukan default service account.
+- Cloud SQL diakses via Cloud SQL Auth Proxy (autentikasi IAM), tidak diekspos ke internet publik.
 
 ---
 
@@ -644,7 +673,7 @@ preview/staging
 production
 ```
 
-Environment secrets disimpan pada secret manager/platform masing-masing, bukan repository.
+Environment secrets disimpan pada secret manager/platform masing-masing, bukan repository — Google Secret Manager untuk backend/Compute Engine, Vercel environment variables untuk frontend.
 
 ---
 
@@ -659,5 +688,6 @@ Tahap 0 boleh dimulai setelah:
 - D1/D2/D3 final.
 - Monorepo strategy final: `apps/api` + `apps/web` dalam satu repository.
 - Domain foundation dipastikan Tahap 1.
-- RLS tenant context implementation strategy dicatat sebagai ADR sebelum modul tenant selesai.
+- RLS tenant context implementation strategy (`SET LOCAL` dalam transaksi) sudah dicatat sebagai ADR (`docs/adr/0002-tenant-rls-session-context.md`) sebelum modul tenant dibangun.
+- Hosting/database/secrets target (Google Compute Engine, Cloud SQL for PostgreSQL, Secret Manager) sudah dicatat sebagai ADR (`docs/adr/0001-gcp-cloud-sql-hosting-migration.md`).
 
