@@ -15,15 +15,15 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: Roll back current release on Oracle
+      - name: Roll back current release on Google Cloud VM
         uses: appleboy/ssh-action@v1
         env:
-          DEPLOY_ROOT: ${{ secrets.ORACLE_DEPLOY_ROOT }}
+          DEPLOY_ROOT: ${{ secrets.GCP_DEPLOY_ROOT }}
           RELEASE_TARGET: ${{ inputs.release }}
         with:
-          host: ${{ secrets.ORACLE_SSH_HOST }}
-          username: ${{ secrets.ORACLE_SSH_USER }}
-          key: ${{ secrets.ORACLE_SSH_KEY }}
+          host: ${{ secrets.GCP_SSH_HOST }}
+          username: ${{ secrets.GCP_SSH_USER }}
+          key: ${{ secrets.GCP_SSH_KEY }}
           envs: DEPLOY_ROOT,RELEASE_TARGET
           script: |
             set -euo pipefail

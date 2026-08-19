@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Runs ON the Oracle target host, invoked over SSH by
+# Runs ON the Google Compute Engine target host, invoked over SSH by
 # .github/workflows/api-deploy.yml. Implements the release-folder + atomic
 # symlink pattern from Tech Spec §7 — "current" only ever moves once the new
 # release's migrations and cache warmup have actually succeeded, so a
@@ -22,6 +22,15 @@ set -euo pipefail
 DEPLOY_ROOT="${1:?deploy_root required}"
 GIT_REF="${2:?git_ref required}"
 KEEP_RELEASES=5
+
+# ADR-0001: docker-compose.yml's `cloud-sql-proxy` service is gated behind
+# the `production` Compose profile so a bare local `docker compose up` never
+# tries to start it (there's no Cloud SQL instance for local dev to point
+# at). Every `docker compose` invocation against this project in production
+# — including this script and rollback.sh — needs the profile active, or
+# Compose refuses the whole file with "depends on undefined service
+# cloud-sql-proxy" (php/horizon/scheduler all depend on it).
+export COMPOSE_PROFILES=production
 
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
 RELEASE_DIR="$DEPLOY_ROOT/releases/$TIMESTAMP"
@@ -50,13 +59,30 @@ COMPOSE_DIR="$DEPLOY_ROOT/current"
 if [ "$IS_FIRST_DEPLOY" = true ]; then
   COMPOSE_DIR="$RELEASE_DIR"
 fi
-echo "==> Ensuring postgres/redis are up"
-(cd "$COMPOSE_DIR" && docker compose up -d postgres redis)
+echo "==> Ensuring redis/cloud-sql-proxy are up"
+(cd "$COMPOSE_DIR" && docker compose up -d redis cloud-sql-proxy)
 
 echo "==> Running migrations and cache warmup against the NEW release (current not yet switched)"
-(cd "$COMPOSE_DIR" && docker compose run --rm --no-deps \
+# cloud-sql-proxy has no Docker healthcheck to wait on (ADR-0001 — the
+# published image is distroless, no shell/CLI tooling to run a CMD-based
+# probe against; see the comment on the service in docker-compose.yml), so
+# unlike the old postgres `condition: service_healthy` gate, "up -d" above
+# returns as soon as the container starts, not once it can actually reach
+# Cloud SQL. Retry the first migration attempt (same 10x/3s pattern already
+# used for the post-deploy health check below) to absorb that startup race
+# instead of failing the whole deploy on a transient connection error.
+migrate_attempt=0
+until (cd "$COMPOSE_DIR" && docker compose run --rm --no-deps \
   -v "$RELEASE_DIR/apps/api:/var/www/html" \
-  php php artisan migrate --force)
+  php php artisan migrate --force); do
+  migrate_attempt=$((migrate_attempt + 1))
+  if [ "$migrate_attempt" -ge 10 ]; then
+    echo "::error::Migrations failed after ${migrate_attempt} attempts — is cloud-sql-proxy able to reach Cloud SQL?" >&2
+    exit 1
+  fi
+  echo "==> Migration attempt ${migrate_attempt} failed, retrying in 3s..."
+  sleep 3
+done
 (cd "$COMPOSE_DIR" && docker compose run --rm --no-deps \
   -v "$RELEASE_DIR/apps/api:/var/www/html" \
   php php artisan config:cache)

@@ -101,39 +101,66 @@ dokumentasi ini.**
    `roles/secretmanager.secretAccessor` — bukan default Compute Engine
    service account. Tidak ada credential yang di-commit ke GitHub.
 8. **GitHub Secrets**: `ORACLE_SSH_HOST`/`ORACLE_SSH_USER`/`ORACLE_SSH_KEY`/
-   `ORACLE_DEPLOY_ROOT` akan di-rename menjadi `GCE_SSH_HOST`/
-   `GCE_SSH_USER`/`GCE_SSH_KEY`/`GCE_DEPLOY_ROOT` **pada saat workflow
-   file diperbarui di fase implementasi** — rename secret dan update
-   workflow harus terjadi dalam PR/commit yang sama agar deploy/rollback
-   tidak pernah membaca secret kosong di antara keduanya.
+   `ORACLE_DEPLOY_ROOT` menjadi `GCP_SSH_HOST`/`GCP_SSH_USER`/`GCP_SSH_KEY`/
+   `GCP_DEPLOY_ROOT` di workflow — rename secret aktual di GitHub Settings
+   harus terjadi bersamaan (bukan sebelum) workflow file diperbarui, agar
+   deploy/rollback tidak pernah membaca secret kosong di antara keduanya.
 
-## Konsekuensi (berlaku setelah implementasi Phase 5–8, belum berlaku sekarang)
+## Status implementasi (diperbarui setelah Phase 1 — repository changes)
 
-- `docker-compose.yml` (produksi) akan berhenti memuat service `postgres`;
-  `php`/`horizon`/`scheduler` akan bergantung pada `redis` +
-  `cloud-sql-proxy`. Local dev akan memakai compose override yang
-  menambahkan kembali `postgres`. **Belum diterapkan** — `docker-compose.yml`
-  saat ini masih memiliki service `postgres` dan tidak ada
-  `cloud-sql-proxy`.
-- `infra/scripts/deploy-release.sh` akan berhenti menjalankan
-  `docker compose up -d postgres redis` di server produksi, digantikan
-  `redis` (dan `cloud-sql-proxy`) saja. **Belum diterapkan** — script saat
-  ini masih menjalankan `docker compose up -d postgres redis`.
-- `BackupDatabase.php` tidak perlu berubah secara logic — `pg_dump` sudah
-  membaca host/port dari koneksi database aktif, otomatis mengarah ke
-  `cloud-sql-proxy` begitu env var berubah di fase implementasi. Cloud SQL
-  automated backups/PITR akan diaktifkan sebagai lapisan tambahan begitu
-  instance dibuat, bukan pengganti backup object-storage custom yang sudah
-  ada.
-- `config/filesystems.php` akan menambah/mengganti disk target media
-  production ke GCS. **Belum diterapkan** — disk `r2` masih yang dipakai
-  kode saat ini.
-- `.github/workflows/api-deploy.yml` dan `rollback.yml` akan di-update
-  untuk membaca `secrets.GCE_*` menggantikan `secrets.ORACLE_*`. **Belum
-  diterapkan** — kedua workflow saat ini masih membaca `secrets.ORACLE_*`
-  secara literal; jangan rename/hapus secret `ORACLE_*` di GitHub sampai
-  workflow ini benar-benar diperbarui pada commit yang sama, atau setiap
-  deploy/rollback akan menerima host/key kosong dan gagal.
+Perubahan **kode repository** untuk poin 2–8 di atas sudah diterapkan:
+`docker-compose.yml` sudah tidak memuat `postgres` di jalur produksi dan
+sudah punya service `cloud-sql-proxy`; `docker-compose.local.yml` menambahkan
+kembali `postgres` untuk local dev; `infra/scripts/deploy-release.sh` sudah
+menjalankan `redis`+`cloud-sql-proxy`; disk `gcs` sudah terdaftar di
+`config/filesystems.php` dan dipakai `BackupDatabase.php`; kedua workflow
+deploy/rollback sudah membaca `secrets.GCP_*`.
+
+**Yang BELUM diterapkan** (infrastruktur GCP, di luar cakupan Phase 1 —
+repository changes only): instance Cloud SQL belum di-provision (nilai
+`CLOUD_SQL_CONNECTION_NAME` masih kosong di `.env.example`), bucket GCS
+belum dibuat (`GCS_PROJECT_ID`/`GCS_BUCKET` masih kosong), Secret Manager
+belum diisi, dan secret `GCP_SSH_*`/`GCP_DEPLOY_ROOT` **belum benar-benar
+dibuat** di GitHub — secret `ORACLE_*` yang lama juga belum dihapus. Jangan
+hapus secret `ORACLE_*` sampai secret `GCP_*` yang baru benar-benar dibuat
+dan diverifikasi bekerja, karena workflow sekarang membaca nama yang baru.
+
+## Konsekuensi (rincian per file — status implementasi per item di atas)
+
+- `docker-compose.yml` (produksi) tidak lagi memuat service `postgres`;
+  `php`/`horizon`/`scheduler` bergantung pada `redis` + `cloud-sql-proxy`
+  (gated di belakang Compose profile `production`). Local dev memakai
+  `docker-compose.local.yml` yang menambahkan kembali `postgres`. **Repo:
+  diterapkan.** Cloud SQL instance-nya sendiri belum ada — service
+  `cloud-sql-proxy` tidak akan bisa benar-benar konek sampai
+  `CLOUD_SQL_CONNECTION_NAME` diisi nilai nyata (Phase 2 infrastructure).
+- `infra/scripts/deploy-release.sh` dan `rollback.sh` menjalankan
+  `export COMPOSE_PROFILES=production` di awal (wajib — dikonfirmasi lewat
+  `docker compose config`/`restart`: tanpa ini Compose menolak seluruh file
+  karena `cloud-sql-proxy` ter-gate profile). `deploy-release.sh` sekarang
+  menjalankan `docker compose up -d redis cloud-sql-proxy`, dan attempt
+  migration pertama di-retry (10×/3s) karena `cloud-sql-proxy` tidak punya
+  Docker healthcheck (image distroless, tidak ada shell/tooling untuk
+  `CMD`-based probe — dikonfirmasi dengan inspeksi image langsung). **Repo:
+  diterapkan.**
+- `BackupDatabase.php` — logic tidak berubah, disk target diganti ke `gcs`.
+  `pg_dump` sudah membaca host/port dari koneksi database aktif, otomatis
+  mengarah ke `cloud-sql-proxy` begitu env var produksi diisi. **Repo:
+  diterapkan.** Cloud SQL automated backups/PITR akan diaktifkan sebagai
+  lapisan tambahan begitu instance dibuat (Phase 2 infrastructure), bukan
+  pengganti backup object-storage custom yang sudah ada.
+- `config/filesystems.php` menambahkan disk `gcs` (driver didaftarkan di
+  `AppServiceProvider::boot()` — Laravel core tidak mengenali `gcs` secara
+  native), menjadi default disk baru. Disk `r2` tetap ada untuk masa
+  transisi. **Repo: diterapkan** (`league/flysystem-google-cloud-storage`
+  ditambahkan ke `composer.json`). `GCS_PROJECT_ID`/`GCS_BUCKET` masih
+  kosong — bucket-nya sendiri belum dibuat (Phase 2 infrastructure).
+- `.github/workflows/api-deploy.yml` dan `rollback.yml` membaca
+  `secrets.GCP_*` menggantikan `secrets.ORACLE_*`. **Repo: diterapkan.**
+  Secret `GCP_*` yang baru **belum benar-benar dibuat** di GitHub — jangan
+  hapus secret `ORACLE_*` lama sampai `GCP_*` dibuat dan diverifikasi
+  bekerja, karena workflow sekarang membaca nama yang baru dan deploy akan
+  gagal dengan host/key kosong sampai itu terjadi.
 - Cloud SQL Auth Proxy adalah tunnel TCP transparan — tidak mengubah
   semantik session/transaction PostgreSQL. Ini relevan untuk implementasi
   RLS tenant context di masa depan — lihat

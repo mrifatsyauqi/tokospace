@@ -1,11 +1,11 @@
 name: API Deploy
 
-# Tech Spec §7 — release-folder + atomic symlink switch to Oracle, only for
-# apps/api changes landing on main. Requires these repo secrets, set up once
-# per Tech Spec §12 step 8 (see infra/README.md for the one-time server-side
-# setup deploy-release.sh expects: a bare mirror clone at $DEPLOY_ROOT/repo.git
-# and $DEPLOY_ROOT/shared/apps-api.env):
-#   ORACLE_SSH_HOST, ORACLE_SSH_USER, ORACLE_SSH_KEY, ORACLE_DEPLOY_ROOT
+# Tech Spec §7 — release-folder + atomic symlink switch to the Google Cloud
+# VM (ADR-0001), only for apps/api changes landing on main. Requires these
+# repo secrets, set up once per Tech Spec §12 step 8 (see infra/README.md for
+# the one-time server-side setup deploy-release.sh expects: a bare mirror
+# clone at $DEPLOY_ROOT/repo.git and $DEPLOY_ROOT/shared/apps-api.env):
+#   GCP_SSH_HOST, GCP_SSH_USER, GCP_SSH_KEY, GCP_DEPLOY_ROOT
 on:
   push:
     branches: [main]
@@ -25,15 +25,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy release to Oracle
+      - name: Deploy release to Google Cloud VM
         uses: appleboy/ssh-action@v1
         env:
-          DEPLOY_ROOT: ${{ secrets.ORACLE_DEPLOY_ROOT }}
+          DEPLOY_ROOT: ${{ secrets.GCP_DEPLOY_ROOT }}
           GIT_SHA: ${{ github.sha }}
         with:
-          host: ${{ secrets.ORACLE_SSH_HOST }}
-          username: ${{ secrets.ORACLE_SSH_USER }}
-          key: ${{ secrets.ORACLE_SSH_KEY }}
+          host: ${{ secrets.GCP_SSH_HOST }}
+          username: ${{ secrets.GCP_SSH_USER }}
+          key: ${{ secrets.GCP_SSH_KEY }}
           envs: DEPLOY_ROOT,GIT_SHA
           # deploy-release.sh isn't scp'd in — it's read straight out of the
           # bare mirror at the ref being deployed, so an update to the script

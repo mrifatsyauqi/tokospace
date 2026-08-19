@@ -9,16 +9,17 @@ use Symfony\Component\Process\Process;
 use Throwable;
 
 /**
- * Tech Spec §14: daily compressed pg_dump, uploaded to R2 (never the Oracle
- * disk it ran on — a lost/rebuilt instance must not mean a lost backup),
- * 30-day retention enforced here rather than relying on R2 lifecycle rules
- * so the policy is visible in application code.
+ * Tech Spec §14: daily compressed pg_dump, uploaded to the 'gcs' disk
+ * (ADR-0001 target — never the VM's local disk it ran on, a lost/rebuilt
+ * instance must not mean a lost backup), 30-day retention enforced here
+ * rather than relying on provider lifecycle rules so the policy is visible
+ * in application code.
  */
 class BackupDatabase extends Command
 {
     protected $signature = 'app:backup-database';
 
-    protected $description = 'Dump the database, compress it, and upload it to R2 with 30-day retention';
+    protected $description = 'Dump the database, compress it, and upload it to GCS with 30-day retention';
 
     private const RETENTION_DAYS = 30;
 
@@ -92,22 +93,22 @@ class BackupDatabase extends Command
             throw new RuntimeException('gzip failed: '.$gzip->getErrorOutput());
         }
 
-        $this->info('Uploading to R2...');
+        $this->info('Uploading to GCS...');
 
         $remotePath = self::BACKUP_PATH.'/'.$filename;
 
-        // The r2 disk has 'throw' => false (Tech Spec §1.1 default for app
+        // The gcs disk has 'throw' => false (Tech Spec §1.1 default for app
         // upload features, which prefer a handled false return over a
         // thrown exception) — put() failing silently would mean this command
         // reports success on a backup that was never actually written.
-        $uploaded = Storage::disk('r2')->put($remotePath, fopen($localPath, 'r'));
+        $uploaded = Storage::disk('gcs')->put($remotePath, fopen($localPath, 'r'));
         unlink($localPath);
 
         if (! $uploaded) {
-            throw new RuntimeException("Upload to r2://{$remotePath} failed.");
+            throw new RuntimeException("Upload to gcs://{$remotePath} failed.");
         }
 
-        $this->info("Uploaded to r2://{$remotePath}");
+        $this->info("Uploaded to gcs://{$remotePath}");
 
         $this->pruneOldBackups();
     }
@@ -117,11 +118,11 @@ class BackupDatabase extends Command
         $cutoff = now()->subDays(self::RETENTION_DAYS);
         $deleted = 0;
 
-        foreach (Storage::disk('r2')->files(self::BACKUP_PATH) as $path) {
-            $timestamp = Storage::disk('r2')->lastModified($path);
+        foreach (Storage::disk('gcs')->files(self::BACKUP_PATH) as $path) {
+            $timestamp = Storage::disk('gcs')->lastModified($path);
 
             if ($timestamp !== false && $timestamp < $cutoff->timestamp) {
-                Storage::disk('r2')->delete($path);
+                Storage::disk('gcs')->delete($path);
                 $deleted++;
             }
         }

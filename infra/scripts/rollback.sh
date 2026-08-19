@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Runs ON the Oracle target host, invoked over SSH by
+# Runs ON the Google Compute Engine target host, invoked over SSH by
 # .github/workflows/rollback.yml (manually triggered from GitHub, per Tech
 # Spec §7 — "Rollback harus dapat mengubah symlink ke release sebelumnya
 # tanpa rebuild source"). No rebuild: this only ever flips the symlink to a
@@ -14,6 +14,11 @@ set -euo pipefail
 
 DEPLOY_ROOT="${1:?deploy_root required}"
 TARGET="${2:-}"
+
+# See the matching comment in deploy-release.sh — required so Compose
+# doesn't reject the whole file over the profile-gated cloud-sql-proxy
+# service (ADR-0001).
+export COMPOSE_PROFILES=production
 
 cd "$DEPLOY_ROOT/releases"
 

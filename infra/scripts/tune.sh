@@ -3,9 +3,8 @@
 # Computes resource-dependent settings from the host's actual detected
 # RAM/CPU and writes them to .env at the repo root, consumed by
 # docker-compose.yml (Tech Spec §4.1/§5 — nothing here may be a fixed
-# constant baked into the image or compose file itself; a move from
-# 2 OCPU/12GB Oracle to any other spec is a re-run of this script, not
-# a code change).
+# constant baked into the image or compose file itself; a move to a
+# different VM spec is a re-run of this script, not a code change).
 #
 # Usage: infra/scripts/tune.sh [path-to-env-file]
 # Safe to re-run — it only touches the TUNE_* managed block, everything

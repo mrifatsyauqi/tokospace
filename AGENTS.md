@@ -73,8 +73,8 @@ find out before it reaches production.
 ```bash
 cp .env.example .env && infra/scripts/tune.sh   # resource settings from actual host RAM/CPU
 cp apps/api/.env.example apps/api/.env
-docker compose up -d --build   # first boot auto-runs `composer install`
-docker compose exec php php artisan key:generate
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build   # first boot auto-runs `composer install`
+docker compose -f docker-compose.yml -f docker-compose.local.yml exec php php artisan key:generate
 curl http://localhost:8000/health
 
 cd apps/web && pnpm install && pnpm dev          # separate — Vercel deploys apps/web independently

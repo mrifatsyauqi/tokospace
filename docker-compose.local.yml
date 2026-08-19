@@ -1,0 +1,52 @@
+# Local development override — layer this on top of docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+#
+# This is the ONLY file that restores a self-hosted `postgres` service.
+# `cloud-sql-proxy` in the base file is gated behind the `production` Compose
+# profile (see docker-compose.yml) so a plain local `up` never tries to
+# start it — there is no real Cloud SQL instance to point it at locally.
+
+services:
+  # `!override` replaces (rather than merges into) the base file's
+  # `depends_on` — without it, Compose would merge in `postgres` alongside
+  # `cloud-sql-proxy`, and a plain local `up` (no `production` profile
+  # active) would then fail to resolve the `cloud-sql-proxy` dependency.
+  php:
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  horizon:
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    command: ["postgres", "-c", "shared_buffers=${POSTGRES_SHARED_BUFFERS:-256MB}"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tokospace}
+      POSTGRES_USER: ${POSTGRES_USER:-tokospace}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tokospace}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tokospace}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:

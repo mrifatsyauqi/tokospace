@@ -24,12 +24,16 @@ authority-document reading order (`docs/tokospace-PRD.md`,
 ```bash
 cp .env.example .env && infra/scripts/tune.sh
 cp apps/api/.env.example apps/api/.env
-docker compose up -d --build   # first boot auto-runs `composer install` (see infra/docker/php/entrypoint.sh)
-docker compose exec php php artisan key:generate
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build   # first boot auto-runs `composer install` (see infra/docker/php/entrypoint.sh)
+docker compose -f docker-compose.yml -f docker-compose.local.yml exec php php artisan key:generate
 curl http://localhost:8000/health
 
 cd apps/web && pnpm install && pnpm dev
 ```
+
+`docker-compose.yml` alone is the production topology (ADR-0001 — PostgreSQL
+is Cloud SQL, not a Docker service); `docker-compose.local.yml` layers a
+self-hosted `postgres` back in for local dev. See `infra/README.md`.
 
 See `infra/README.md` for what each Compose service does, and
 `apps/api/CLAUDE.md` / `apps/web/CLAUDE.md` for per-app conventions.

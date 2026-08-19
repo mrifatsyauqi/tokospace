@@ -17,8 +17,9 @@ things specific to this app.
    jangan pernah pakai `withoutGlobalScope` kecuali di konteks Super Admin
    yang eksplisit dan diaudit).
 4. Media production (foto produk, logo, banner, bukti transfer, invoice,
-   import/export) selalu ke disk `r2` (`config/filesystems.php`) — `local`
-   disk hanya untuk temp/cache/log.
+   import/export) selalu ke disk `gcs` (`config/filesystems.php`) — `local`
+   disk hanya untuk temp/cache/log. `r2` masih ada untuk masa transisi
+   (ADR-0001), jangan tulis kode baru yang menargetkannya.
 5. Jalankan `vendor/bin/pest --group=arch` sebelum selesai — kalau gagal,
    ada modul yang saling mengimpor secara ilegal.
 6. `.env` never gets committed. `.env.example` is the template — update it
@@ -30,7 +31,7 @@ things specific to this app.
 ```bash
 composer install
 php artisan test                    # host-local (sqlite, see .env)
-docker compose exec php php artisan test   # against real Postgres/Redis
+docker compose -f ../../docker-compose.yml -f ../../docker-compose.local.yml exec php php artisan test   # against real Postgres/Redis, run from repo root
 vendor/bin/pint                     # auto-fix code style
 composer export-openapi             # regenerate openapi.json — commit it
                                      # whenever routes/Form Requests change,
@@ -39,13 +40,18 @@ composer export-openapi             # regenerate openapi.json — commit it
 
 ## Storage disks
 
-Two disks, both defined explicitly (Tech Spec §1.1) — never add a third
+Three disks, all defined explicitly (Tech Spec §1.1) — never add a fourth
 without updating this file and the Tech Spec:
 
 - `local` — transient only (temp upload processing, framework cache/log).
   Never production media.
-- `r2` — default disk, S3-compatible, Cloudflare R2. Every upload feature
-  writes here unless it's explicitly a `Temp/` path.
+- `gcs` — default disk (ADR-0001 target), Google Cloud Storage. Every
+  upload feature writes here unless it's explicitly a `Temp/` path. Driver
+  registered in `App\Providers\AppServiceProvider::boot()` — Laravel core
+  doesn't recognize `gcs` natively.
+- `r2` — Cloudflare R2, current pre-migration production disk. Kept defined
+  until the ADR-0001 storage cutover is executed. Don't write new code
+  targeting it.
 
 ## Module layout (Tech Spec §10)
 
